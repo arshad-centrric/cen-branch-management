@@ -27,6 +27,7 @@ app_license = "mit"
 # include js, css files in header of desk.html
 # app_include_css = "/assets/cen_branch_management/css/cen_branch_management.css"
 # app_include_js = "/assets/cen_branch_management/js/cen_branch_management.js"
+app_include_js = ["/assets/cen_branch_management/js/branch_filters.js", "/assets/cen_branch_management/js/branch_switcher.js"]
 
 # include js, css files in header of web template
 # web_include_css = "/assets/cen_branch_management/css/cen_branch_management.css"
@@ -44,6 +45,7 @@ app_license = "mit"
 
 # include js in doctype views
 # doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {"Branch" : "public/js/branch_custom.js"}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -87,6 +89,8 @@ app_license = "mit"
 
 # before_install = "cen_branch_management.install.before_install"
 # after_install = "cen_branch_management.install.after_install"
+
+after_migrate = "cen_branch_management.setup.after_migrate"
 
 # Uninstallation
 # ------------
@@ -138,13 +142,11 @@ app_license = "mit"
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+    "Branch": {
+        "validate": "cen_branch_management.overrides.branch_validation.validate_default_branch"
+    }
+}
 
 # Scheduled Tasks
 # ---------------
@@ -190,9 +192,9 @@ app_license = "mit"
 # each overriding function accepts a `data` argument;
 # generated from the base implementation of the doctype dashboard,
 # along with any modifications made in other Frappe apps
-# override_doctype_dashboards = {
-# 	"Task": "cen_branch_management.task.get_dashboard_data"
-# }
+override_doctype_dashboards = {
+    "Company": "cen_branch_management.overrides.company_dashboard.get_data"
+}
 
 # exempt linked doctypes from being automatically cancelled
 #
