@@ -258,3 +258,5 @@ override_doctype_dashboards = {
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
 
+after_migrate = "cen_branch_management.setup.after_migrate"
+on_login = "cen_branch_management.api.switcher.initialize_session_branch"

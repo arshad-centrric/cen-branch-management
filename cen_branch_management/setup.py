@@ -51,8 +51,35 @@ def setup_accounting_dimension():
         doc.document_type = "Branch"
         doc.insert(ignore_permissions=True)
 
+def setup_branch_role_permissions():
+    role_perms = {
+        "System Manager": {"read": 1, "write": 1, "create": 1, "delete": 1},
+        "Supervisor": {"read": 1, "write": 1, "create": 1, "delete": 0},
+        "Sales Person": {"read": 1, "write": 1, "create": 1, "delete": 0},
+        "Sales User": {"read": 1, "write": 0, "create": 0, "delete": 0},
+        "Purchase User": {"read": 1, "write": 0, "create": 0, "delete": 0},
+        "Stock User": {"read": 1, "write": 0, "create": 0, "delete": 0}
+    }
+    
+    for role, perms in role_perms.items():
+        if not frappe.db.exists("Role", role):
+            continue
+            
+        if frappe.db.exists("Custom DocPerm", {"parent": "Branch", "role": role}):
+            continue
+            
+        doc = frappe.new_doc("Custom DocPerm")
+        doc.parent = "Branch"
+        doc.parenttype = "DocType"
+        doc.parentfield = "permissions"
+        doc.role = role
+        for key, val in perms.items():
+            doc.set(key, val)
+        doc.insert(ignore_permissions=True)
+
 def after_migrate():
     add_custom_fields()
     setup_accounting_dimension()
+    setup_branch_role_permissions()
 
 

@@ -8,7 +8,8 @@ const branch_doctypes = [
     "Purchase Invoice", 
     "Delivery Note", 
     "Purchase Receipt", 
-    "Journal Entry"
+    "Journal Entry",
+    "Payment Entry"
 ];
 
 branch_doctypes.forEach(doctype => {
@@ -22,6 +23,13 @@ branch_doctypes.forEach(doctype => {
         let branch_cost_centers = frappe.defaults.get_user_default("cen_branch_cost_centers");
 
         if (!active_branch || active_branch === "All Branches") return;
+
+        // Auto-Setter for Company (Overpowers native Frappe defaults)
+        if (frm.is_new() && frm.fields_dict.company && branch_company && branch_company !== "All Branches") {
+            if (frm.doc.company !== branch_company) {
+                frm.set_value("company", branch_company);
+            }
+        }
 
         // Restrict Company
         if (frm.fields_dict.company && branch_company) {
@@ -74,14 +82,39 @@ branch_doctypes.forEach(doctype => {
             });
         }
         
-        // Custom Delivery Store
+        // Custom Delivery Store (Child Table)
         if (frm.fields_dict.custom_location_details && branch_warehouses) {
             let allowed_warehouses = branch_warehouses.split(",");
             frm.set_query("custom_delivery_store", "custom_location_details", function() {
                 return { filters: { "name": ["in", allowed_warehouses] } };
             });
         }
+
+        // Custom Delivery Store (Parent)
+        if (frm.fields_dict.custom_delivery_store && branch_warehouses) {
+            let allowed_warehouses = branch_warehouses.split(",");
+            frm.set_query("custom_delivery_store", function() {
+                return { filters: { "name": ["in", allowed_warehouses] } };
+            });
+        }
         
+        // Rejected Warehouse
+        if (frm.fields_dict.rejected_warehouse && branch_warehouses) {
+            let allowed_warehouses = branch_warehouses.split(",");
+            frm.set_query("rejected_warehouse", function() {
+                return { filters: { "name": ["in", allowed_warehouses] } };
+            });
+        }
+
+        // SAFETY CHECK: Filter for custom_selling_price_list from akbar16_addons app
+        // Wraps in an if-condition so it does not crash standard ERPNext sites
+        if (frm.fields_dict.custom_selling_price_list && branch_selling_pl) {
+            let allowed_selling_pl = branch_selling_pl.split(",");
+            frm.set_query("custom_selling_price_list", function() {
+                return { filters: { "name": ["in", allowed_selling_pl] } };
+            });
+        }
+
         if (frm.fields_dict.items) {
             if (branch_warehouses) {
                 let allowed_warehouses = branch_warehouses.split(",");
@@ -99,6 +132,9 @@ branch_doctypes.forEach(doctype => {
     };
 
     frappe.ui.form.on(doctype, {
+        onload: function(frm) {
+            apply_sandbox_queries(frm);
+        },
         refresh: function(frm) {
             let active_branch = frappe.defaults.get_user_default("branch");
             let branch_company = frappe.defaults.get_user_default("cen_branch_company");
@@ -134,6 +170,14 @@ branch_doctypes.forEach(doctype => {
                         frm.set_value("buying_price_list", null);
                     }
                 }
+
+                // Custom Selling Price List Auto-Clear
+                if (frm.fields_dict.custom_selling_price_list && branch_selling_pl) {
+                    let allowed_selling_pl = branch_selling_pl.split(",");
+                    if (frm.doc.custom_selling_price_list && !allowed_selling_pl.includes(frm.doc.custom_selling_price_list)) {
+                        frm.set_value("custom_selling_price_list", null);
+                    }
+                }
             }
 
             apply_sandbox_queries(frm);
@@ -142,6 +186,9 @@ branch_doctypes.forEach(doctype => {
             apply_sandbox_queries(frm);
         },
         company: function(frm) {
+            apply_sandbox_queries(frm);
+        },
+        supplier: function(frm) {
             apply_sandbox_queries(frm);
         }
     });
@@ -159,6 +206,9 @@ branch_doctypes.forEach(doctype => {
                 if (branch_doctypes.includes(this.doctype)) {
                     let active_branch = frappe.defaults.get_user_default("branch");
                     if (active_branch && active_branch !== "All Branches") {
+                        let branch_company = frappe.defaults.get_user_default("cen_branch_company");
+                        let branch_cost_centers = frappe.defaults.get_user_default("cen_branch_cost_centers");
+
                         let branch_fieldname = null;
                         if (frappe.meta.has_field(this.doctype, "custom_cen_branch")) {
                             branch_fieldname = "custom_cen_branch";
@@ -166,13 +216,20 @@ branch_doctypes.forEach(doctype => {
                             branch_fieldname = "branch";
                         }
                         
+                        this.filters = this.filters.filter(f => !["branch", "custom_cen_branch", "company", "cost_center"].includes(f[1]));
+
                         if (branch_fieldname) {
-                            this.filters = this.filters.filter(f => !["branch", "custom_cen_branch"].includes(f[1]));
                             this.filters.push([this.doctype, branch_fieldname, "=", active_branch]);
+                        } else if (this.doctype === "Payment Entry" && branch_cost_centers && frappe.meta.has_field(this.doctype, "cost_center")) {
+                            this.filters.push([this.doctype, "cost_center", "in", branch_cost_centers.split(",")]);
+                        }
+
+                        if (branch_company && frappe.meta.has_field(this.doctype, "company")) {
+                            this.filters.push([this.doctype, "company", "=", branch_company]);
                         }
                     } else {
                         // Active branch is 'All Branches' or null. Clear any lingering branch filters saved from a previous session.
-                        this.filters = this.filters.filter(f => !["branch", "custom_cen_branch"].includes(f[1]));
+                        this.filters = this.filters.filter(f => !["branch", "custom_cen_branch", "company", "cost_center"].includes(f[1]));
                     }
                 }
             };
@@ -189,4 +246,43 @@ branch_doctypes.forEach(doctype => {
         
         frappe.views.ListView.prototype._cen_patched = true;
     }
+});
+
+// 3. Child Table Item Interception (Warehouse Override)
+// Hook directly into the warehouse field change event on child rows.
+// When Frappe's native get_item_details finishes fetching, it uses set_value for the warehouse.
+// We intercept this and override it forcefully if it violates the user's branch warehouse permissions.
+
+const child_doctypes = [
+    "Quotation Item", 
+    "Sales Order Item", 
+    "Sales Invoice Item", 
+    "Purchase Order Item", 
+    "Purchase Invoice Item", 
+    "Delivery Note Item", 
+    "Purchase Receipt Item"
+];
+
+child_doctypes.forEach(child_doctype => {
+    frappe.ui.form.on(child_doctype, {
+        warehouse: function(frm, cdt, cdn) {
+            let row = frappe.get_doc(cdt, cdn);
+            let branch_warehouses = frappe.defaults.get_user_default("cen_branch_warehouses");
+            
+            if (branch_warehouses && row.warehouse) {
+                let allowed_warehouses = branch_warehouses.split(",");
+                
+                // If ERPNext's native trigger forced a warehouse outside the user's branch
+                if (!allowed_warehouses.includes(row.warehouse)) {
+                    // Forcefully overwrite it with their primary branch warehouse
+                    frappe.model.set_value(cdt, cdn, 'warehouse', allowed_warehouses[0]);
+                    
+                    frappe.show_alert({
+                        message: __('Warehouse automatically updated to match your branch.'),
+                        indicator: 'blue'
+                    });
+                }
+            }
+        }
+    });
 });

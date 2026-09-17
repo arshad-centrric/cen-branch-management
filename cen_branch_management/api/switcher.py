@@ -1,5 +1,10 @@
 import frappe
 
+def initialize_session_branch(login_manager):
+    active_branch = frappe.db.get_default("branch")
+    if active_branch and active_branch != "All Branches":
+        set_active_branch(active_branch)
+
 @frappe.whitelist()
 def get_user_branches():
     user_branches = frappe.get_all(
