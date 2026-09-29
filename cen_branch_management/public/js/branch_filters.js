@@ -19,6 +19,8 @@ branch_doctypes.forEach(doctype => {
         let branch_company = frappe.defaults.get_user_default("cen_branch_company");
         let branch_selling_pl = frappe.defaults.get_user_default("cen_branch_selling_price_lists");
         let branch_buying_pl = frappe.defaults.get_user_default("cen_branch_buying_price_lists");
+        let branch_default_selling_pl = frappe.defaults.get_user_default("cen_branch_default_selling_price_list");
+        let branch_default_buying_pl = frappe.defaults.get_user_default("cen_branch_default_buying_price_list");
         let branch_warehouses = frappe.defaults.get_user_default("cen_branch_warehouses");
         let branch_cost_centers = frappe.defaults.get_user_default("cen_branch_cost_centers");
 
@@ -28,6 +30,18 @@ branch_doctypes.forEach(doctype => {
         if (frm.is_new() && frm.fields_dict.company && branch_company && branch_company !== "All Branches") {
             if (frm.doc.company !== branch_company) {
                 frm.set_value("company", branch_company);
+            }
+        }
+
+        // Auto-Setter for Price Lists (Overpowers native Frappe/customer/supplier defaults)
+        if (frm.is_new() && frm.fields_dict.selling_price_list && branch_default_selling_pl) {
+            if (frm.doc.selling_price_list !== branch_default_selling_pl) {
+                frm.set_value("selling_price_list", branch_default_selling_pl);
+            }
+        }
+        if (frm.is_new() && frm.fields_dict.buying_price_list && branch_default_buying_pl) {
+            if (frm.doc.buying_price_list !== branch_default_buying_pl) {
+                frm.set_value("buying_price_list", branch_default_buying_pl);
             }
         }
 
@@ -140,7 +154,9 @@ branch_doctypes.forEach(doctype => {
             let branch_company = frappe.defaults.get_user_default("cen_branch_company");
             let branch_selling_pl = frappe.defaults.get_user_default("cen_branch_selling_price_lists");
             let branch_buying_pl = frappe.defaults.get_user_default("cen_branch_buying_price_lists");
-            
+            let branch_default_selling_pl = frappe.defaults.get_user_default("cen_branch_default_selling_price_list");
+            let branch_default_buying_pl = frappe.defaults.get_user_default("cen_branch_default_buying_price_list");
+
             if (!active_branch || active_branch === "All Branches") return;
 
             // Auto-Setters (Only for new or draft documents)
@@ -155,19 +171,19 @@ branch_doctypes.forEach(doctype => {
                     frm.set_value("branch", active_branch);
                 }
                 
-                // Restrict Selling Price Lists Auto-Clear
+                // Restrict Selling Price Lists (fall back to branch default when disallowed)
                 if (frm.fields_dict.selling_price_list && branch_selling_pl) {
                     let allowed_selling_pl = branch_selling_pl.split(",");
                     if (frm.doc.selling_price_list && !allowed_selling_pl.includes(frm.doc.selling_price_list)) {
-                        frm.set_value("selling_price_list", null);
+                        frm.set_value("selling_price_list", branch_default_selling_pl || null);
                     }
                 }
 
-                // Restrict Buying Price Lists Auto-Clear
+                // Restrict Buying Price Lists (fall back to branch default when disallowed)
                 if (frm.fields_dict.buying_price_list && branch_buying_pl) {
                     let allowed_buying_pl = branch_buying_pl.split(",");
                     if (frm.doc.buying_price_list && !allowed_buying_pl.includes(frm.doc.buying_price_list)) {
-                        frm.set_value("buying_price_list", null);
+                        frm.set_value("buying_price_list", branch_default_buying_pl || null);
                     }
                 }
 
