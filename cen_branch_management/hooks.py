@@ -144,7 +144,8 @@ after_migrate = "cen_branch_management.setup.after_migrate"
 
 doc_events = {
     "Branch": {
-        "validate": "cen_branch_management.overrides.branch_validation.validate_default_branch"
+        "validate": "cen_branch_management.overrides.branch_validation.validate_default_branch",
+        "on_update": "cen_branch_management.api.permissions.sync_permissions_on_update"
     }
 }
 
