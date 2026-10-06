@@ -1,6 +1,8 @@
 import frappe
 from frappe.cache_manager import clear_defaults_cache
 
+from cen_branch_management.overrides.branch_address import ADDRESS_BRANCH_FIELD
+
 # All user-default keys this app owns. Kept as one list so the write path
 # (apply/clear) and the read path (get_branch_scope) agree on exactly what
 # "a branch's scope" means, and so a switch/clear always fully replaces the
@@ -15,6 +17,8 @@ BRANCH_DEFAULT_KEYS = [
     "cen_branch_cost_center",
     "cen_branch_cost_centers",
     "cen_branch_default_cost_center",
+    "cen_branch_default_address",
+    "cen_branch_addresses",
     "cen_branch_selling_price_lists",
     "cen_branch_buying_price_lists",
     "cen_branch_default_selling_price_list",
@@ -157,6 +161,19 @@ def _compute_branch_scope(branch_doc):
     # above, which only restrict what can be picked.
     scope["cen_branch_default_warehouse"] = branch_doc.get("custom_cen_default_warehouse") or None
     scope["cen_branch_default_cost_center"] = branch_doc.get("custom_cen_default_cost_center") or None
+
+    # The Branch Address is filled into the company address of new documents;
+    # the full list of the branch's addresses tells the form which values to
+    # leave alone. Joined by newline: address names can contain commas.
+    default_address = branch_doc.get("custom_cen_branch_address") or None
+    branch_addresses = frappe.get_all(
+        "Address", filters={ADDRESS_BRANCH_FIELD: branch_doc.name, "disabled": 0}, pluck="name", order_by="name"
+    )
+    if default_address and default_address not in branch_addresses:
+        branch_addresses.append(default_address)
+
+    scope["cen_branch_default_address"] = default_address
+    scope["cen_branch_addresses"] = "\n".join(branch_addresses) or None
 
     selling_price_lists = set()
     for row in branch_doc.get("custom_cen_allowed_selling_price_lists", []):

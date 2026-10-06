@@ -1,6 +1,7 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from cen_branch_management.api import switcher
 from cen_branch_management.api.address import branch_address_query
 from cen_branch_management.tests import utils
 
@@ -15,6 +16,9 @@ class TestBranchAddress(IntegrationTestCase):
         companies = utils.get_companies()
         cls.company = companies[0]
         cls.other_company = companies[1] if len(companies) > 1 else None
+
+    def tearDown(self):
+        frappe.set_user("Administrator")
 
     def branch_of(self, address):
         return frappe.db.get_value("Address", address, ADDRESS_BRANCH)
@@ -165,3 +169,35 @@ class TestBranchAddress(IntegrationTestCase):
     def test_query_needs_a_company(self):
         utils.make_address(self.company)
         self.assertEqual(self.search("", ""), set())
+
+    # Branch switch
+
+    def test_switching_branch_carries_the_branch_address(self):
+        user = utils.make_user()
+        main = utils.make_address(self.company)
+        with_address = utils.make_branch(self.company, users=[user], custom_cen_branch_address=main)
+        extra = utils.make_address(self.company, branch=with_address.name)
+        other_branch = utils.make_branch(self.company, users=[user])
+        utils.make_address(self.company, branch=other_branch.name)
+
+        def current(key):
+            return frappe.defaults.get_user_default(key, user)
+
+        frappe.set_user(user)
+
+        scope = switcher.set_active_branch(with_address.name)["scope"]
+        self.assertEqual(scope["cen_branch_default_address"], main)
+        self.assertEqual(set(scope["cen_branch_addresses"].split("\n")), {main, extra})
+        self.assertEqual(current("cen_branch_default_address"), main)
+
+        # A branch with addresses but no Branch Address: nothing to fill, and
+        # the previous branch's address must not linger.
+        scope = switcher.set_active_branch(other_branch.name)["scope"]
+        self.assertIsNone(scope["cen_branch_default_address"])
+        self.assertIsNone(current("cen_branch_default_address"))
+        self.assertNotIn(main, scope["cen_branch_addresses"])
+
+        switcher.set_active_branch(with_address.name)
+        switcher.set_active_branch("All Branches")
+        self.assertIsNone(current("cen_branch_default_address"))
+        self.assertIsNone(current("cen_branch_addresses"))

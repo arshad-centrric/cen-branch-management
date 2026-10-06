@@ -71,6 +71,38 @@ Object.assign(window.cen_branch_management, {
         "Purchase Receipt": ["billing_address", "shipping_address"]
     },
 
+    // The one field per doctype that takes the branch's Branch Address on a new
+    // document: the company's own billing address. ERPNext pre-fills it with
+    // the company's default address, which knows nothing about branches.
+    // (Buying's shipping_address is not filled: it can be a customer's.)
+    default_address_fields: {
+        "Quotation": "company_address",
+        "Sales Order": "company_address",
+        "Sales Invoice": "company_address",
+        "Delivery Note": "company_address",
+        "Purchase Order": "billing_address",
+        "Purchase Invoice": "billing_address",
+        "Purchase Receipt": "billing_address"
+    },
+
+    // Change handler for those fields. ERPNext fills them asynchronously, after
+    // our own pass has run, so its pick has to be looked at again here. A field
+    // the user emptied themselves is remembered and left empty.
+    //
+    // Our own write is recognised by its value, not by a "we are writing" flag:
+    // ERPNext's write and ours can land almost together, and a flag would then
+    // be consumed by the wrong one and let ERPNext's pick through.
+    on_default_address_changed: function(frm, fieldname) {
+        if (cen_branch_management.default_address_fields[frm.doctype] !== fieldname) return;
+
+        let state = cen_branch_management.get_doc_state(frm);
+        let value = frm.doc[fieldname] || "";
+        if (state.address_written !== undefined && value === state.address_written) return;
+
+        state.address_cleared_by_user = !value;
+        cen_branch_management.apply_branch_scoping(frm);
+    },
+
     // Field on Address that says which branch a company address belongs to.
     ADDRESS_BRANCH_FIELD: "custom_cen_address_branch",
 
@@ -176,6 +208,8 @@ Object.assign(window.cen_branch_management, {
             cen_branch_cost_center: frappe.defaults.get_user_default("cen_branch_cost_center"),
             cen_branch_cost_centers: frappe.defaults.get_user_default("cen_branch_cost_centers"),
             cen_branch_default_cost_center: frappe.defaults.get_user_default("cen_branch_default_cost_center"),
+            cen_branch_default_address: frappe.defaults.get_user_default("cen_branch_default_address"),
+            cen_branch_addresses: frappe.defaults.get_user_default("cen_branch_addresses"),
             cen_branch_selling_price_lists: frappe.defaults.get_user_default("cen_branch_selling_price_lists"),
             cen_branch_buying_price_lists: frappe.defaults.get_user_default("cen_branch_buying_price_lists"),
             cen_branch_default_selling_price_list: frappe.defaults.get_user_default("cen_branch_default_selling_price_list"),
@@ -296,23 +330,43 @@ Object.assign(window.cen_branch_management, {
             wanted.cost_center = scope.cen_branch_default_cost_center;
         }
 
+        // Branch Address. Unlike the fields above this one is never empty when
+        // we get to it -- ERPNext has already put the company's default address
+        // there -- so "only fill when empty" would never fire. An address that
+        // is not one of this branch's is therefore replaced as well; one that is
+        // (the user picked it from the branch-filtered dropdown) is kept.
+        let state = cen_branch_management.get_doc_state(frm);
+        let address_field = cen_branch_management.default_address_fields[frm.doctype];
+        let branch_addresses = (scope.cen_branch_addresses || "").split("\n").filter(Boolean);
+        if (address_field && scope.cen_branch_default_address && !state.address_cleared_by_user) {
+            wanted[address_field] = scope.cen_branch_default_address;
+        }
+
         new Set(Object.keys(filled).concat(Object.keys(wanted))).forEach(fieldname => {
             if (!frm.fields_dict[fieldname]) return;
 
+            let is_address = fieldname === address_field;
             let current = frm.doc[fieldname];
             let is_ours = Boolean(current) && current === filled[fieldname];
+            let is_foreign_address = is_address && Boolean(wanted[fieldname]) && !branch_addresses.includes(current);
 
-            if (current && !is_ours) {
+            if (current && !is_ours && !is_foreign_address) {
                 delete filled[fieldname];
                 return;
             }
 
             if (wanted[fieldname]) {
                 filled[fieldname] = wanted[fieldname];
-                if (current !== wanted[fieldname]) frm.set_value(fieldname, wanted[fieldname]);
+                if (current !== wanted[fieldname]) {
+                    if (is_address) state.address_written = wanted[fieldname];
+                    frm.set_value(fieldname, wanted[fieldname]);
+                }
             } else {
                 delete filled[fieldname];
-                if (is_ours) frm.set_value(fieldname, null);
+                if (is_ours) {
+                    if (is_address) state.address_written = "";
+                    frm.set_value(fieldname, null);
+                }
             }
         });
 
@@ -584,6 +638,10 @@ cen_branch_management.get_form_doctypes().forEach(doctype => {
         supplier: function(frm) {
             cen_branch_management.apply_branch_scoping(frm);
         },
+        // Quotation chooses its customer or lead through this field.
+        party_name: function(frm) {
+            cen_branch_management.apply_branch_scoping(frm);
+        },
         // Stock Entry: the purpose decides which warehouse field the branch
         // default goes into (see default_warehouse_fields).
         purpose: function(frm) {
@@ -591,6 +649,12 @@ cen_branch_management.get_form_doctypes().forEach(doctype => {
         },
         stock_entry_type: function(frm) {
             cen_branch_management.apply_branch_scoping(frm);
+        },
+        company_address: function(frm) {
+            cen_branch_management.on_default_address_changed(frm, "company_address");
+        },
+        billing_address: function(frm) {
+            cen_branch_management.on_default_address_changed(frm, "billing_address");
         },
         branch: function(frm) {
             cen_branch_management.on_doc_branch_changed(frm, "branch");
