@@ -129,18 +129,22 @@ frappe.ui.form.on("Branch", {
     refresh: function(frm) {
         CEN_BRANCH_TREE_DEFAULTS.forEach(config => cen_load_parent_bounds(frm, config));
         frm.trigger("update_user_count");
-        frm.add_custom_button('Sync User Permissions', function() {
-            frappe.show_alert({message: "Syncing Permissions...", indicator: 'blue'});
-            frappe.call({
-                method: "cen_branch_management.api.permissions.sync_branch_permissions",
-                args: { branch_name: frm.doc.name },
-                callback: function(r) {
-                    if (!r.exc) {
-                        frappe.msgprint("User Permissions have been successfully synced for this branch.");
+        // The server only accepts this from someone who can edit the branch
+        // (saving it runs the same sync), so don't offer it to anyone else.
+        if (!frm.is_new() && frm.perm[0] && frm.perm[0].write) {
+            frm.add_custom_button('Sync User Permissions', function() {
+                frappe.show_alert({message: "Syncing Permissions...", indicator: 'blue'});
+                frappe.call({
+                    method: "cen_branch_management.api.permissions.sync_branch_permissions",
+                    args: { branch_name: frm.doc.name },
+                    callback: function(r) {
+                        if (!r.exc) {
+                            frappe.msgprint("User Permissions have been successfully synced for this branch.");
+                        }
                     }
-                }
+                });
             });
-        });
+        }
     },
     validate: function(frm) {
         if (frm.doc.custom_cen_default_selling_price_list) {

@@ -150,6 +150,9 @@ doc_events = {
             "cen_branch_management.overrides.branch_validation.validate_allowed_item_groups",
         ],
         "on_update": "cen_branch_management.api.permissions.sync_permissions_on_update"
+    },
+    "User": {
+        "on_update": "cen_branch_management.api.permissions.sync_permissions_on_user_update"
     }
 }
 
