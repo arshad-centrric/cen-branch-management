@@ -2,26 +2,43 @@ import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 def add_custom_fields():
-    for fieldname in ["custom_cen_default_price_list", "custom_cen_config_section", "custom_cen_pricing_section"]:
+    # custom_cen_config_col: the Details tab is now laid out as "Warehouse" and
+    # "Cost Center" sections, so the old lone column break is obsolete.
+    for fieldname in ["custom_cen_default_price_list", "custom_cen_config_section", "custom_cen_config_col"]:
         if frappe.db.exists("Custom Field", f"Branch-{fieldname}"):
             frappe.delete_doc("Custom Field", f"Branch-{fieldname}", force=True)
-            
+
+    # The "Configuration" tab (fieldname kept as custom_cen_pricing_section so
+    # nothing referencing it breaks) started life as a Section Break. A custom
+    # field's type can't be changed in place, so drop it only in that case; an
+    # existing Tab Break is simply updated (label etc.) by create_custom_fields.
+    pricing_fieldtype = frappe.db.get_value("Custom Field", "Branch-custom_cen_pricing_section", "fieldtype")
+    if pricing_fieldtype and pricing_fieldtype != "Tab Break":
+        frappe.delete_doc("Custom Field", "Branch-custom_cen_pricing_section", force=True)
+
     if frappe.db.exists("Custom Field", "User Permission-custom_cen_source_branch"):
         frappe.delete_doc("Custom Field", "User Permission-custom_cen_source_branch", force=True)
 
     custom_fields = {
         "Branch": [
             {"fieldname": "custom_cen_default_company", "label": "Company", "fieldtype": "Link", "options": "Company", "insert_after": "branch"},
-            {"fieldname": "custom_cen_config_col", "fieldtype": "Column Break", "insert_after": "custom_cen_default_company"},
-            {"fieldname": "custom_cen_warehouse_parent", "label": "Warehouse Parent", "fieldtype": "Link", "options": "Warehouse", "insert_after": "custom_cen_config_col"},
-            {"fieldname": "custom_cen_cost_center_parent", "label": "Cost Center Parent", "fieldtype": "Link", "options": "Cost Center", "insert_after": "custom_cen_warehouse_parent"},
-            {"fieldname": "custom_cen_pricing_section", "label": "Pricing", "fieldtype": "Tab Break", "insert_after": "custom_cen_cost_center_parent"},
+            {"fieldname": "custom_cen_warehouse_section", "label": "Warehouse", "fieldtype": "Section Break", "insert_after": "custom_cen_default_company"},
+            {"fieldname": "custom_cen_warehouse_parent", "label": "Warehouse Parent", "fieldtype": "Link", "options": "Warehouse", "insert_after": "custom_cen_warehouse_section"},
+            {"fieldname": "custom_cen_warehouse_col", "fieldtype": "Column Break", "insert_after": "custom_cen_warehouse_parent"},
+            {"fieldname": "custom_cen_default_warehouse", "label": "Default Warehouse", "fieldtype": "Link", "options": "Warehouse", "insert_after": "custom_cen_warehouse_col"},
+            {"fieldname": "custom_cen_cost_center_section", "label": "Cost Center", "fieldtype": "Section Break", "insert_after": "custom_cen_default_warehouse"},
+            {"fieldname": "custom_cen_cost_center_parent", "label": "Cost Center Parent", "fieldtype": "Link", "options": "Cost Center", "insert_after": "custom_cen_cost_center_section"},
+            {"fieldname": "custom_cen_cost_center_col", "fieldtype": "Column Break", "insert_after": "custom_cen_cost_center_parent"},
+            {"fieldname": "custom_cen_default_cost_center", "label": "Default Cost Center", "fieldtype": "Link", "options": "Cost Center", "insert_after": "custom_cen_cost_center_col"},
+            {"fieldname": "custom_cen_pricing_section", "label": "Configuration", "fieldtype": "Tab Break", "insert_after": "custom_cen_default_cost_center"},
             {"fieldname": "custom_cen_default_selling_price_list", "label": "Default Selling Price List", "fieldtype": "Link", "options": "Price List", "insert_after": "custom_cen_pricing_section"},
             {"fieldname": "custom_cen_allowed_selling_price_lists", "label": "Allowed Selling Price Lists", "fieldtype": "Table", "options": "Branch Allowed Selling Price List", "insert_after": "custom_cen_default_selling_price_list"},
             {"fieldname": "custom_cen_pricing_col", "fieldtype": "Column Break", "insert_after": "custom_cen_allowed_selling_price_lists"},
             {"fieldname": "custom_cen_default_buying_price_list", "label": "Default Buying Price List", "fieldtype": "Link", "options": "Price List", "insert_after": "custom_cen_pricing_col"},
             {"fieldname": "custom_cen_allowed_buying_price_lists", "label": "Allowed Buying Price Lists", "fieldtype": "Table", "options": "Branch Allowed Buying Price List", "insert_after": "custom_cen_default_buying_price_list"},
-            {"fieldname": "custom_cen_users_tab", "label": "User Access", "fieldtype": "Tab Break", "insert_after": "custom_cen_allowed_buying_price_lists"},
+            {"fieldname": "custom_cen_item_groups_section", "label": "Allowed Item Groups", "fieldtype": "Section Break", "insert_after": "custom_cen_allowed_buying_price_lists"},
+            {"fieldname": "custom_cen_allowed_item_groups", "label": "Allowed Item Groups", "fieldtype": "Table", "options": "Branch Item Group", "insert_after": "custom_cen_item_groups_section"},
+            {"fieldname": "custom_cen_users_tab", "label": "User Access", "fieldtype": "Tab Break", "insert_after": "custom_cen_allowed_item_groups"},
             {"fieldname": "custom_cen_counter_section", "fieldtype": "Section Break", "hidden": 0, "insert_after": "custom_cen_users_tab"},
             {"fieldname": "custom_cen_total_users_html", "fieldtype": "HTML", "insert_after": "custom_cen_counter_section"},
             {"fieldname": "custom_cen_table_section", "label": "Assigned Users", "fieldtype": "Section Break", "insert_after": "custom_cen_total_users_html"},
