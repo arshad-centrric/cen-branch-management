@@ -129,12 +129,12 @@ Object.assign(window.cen_branch_management, {
 
         // A document's own branch only overrides the session's active branch when
         // it reflects a deliberate choice: an existing/draft doc that already had
-        // it set (loaded from the DB), or a new doc whose branch the user actually
-        // edited themselves. A brand-new doc whose branch was only ever auto-filled
-        // by us to match the session must keep tracking the session -- otherwise,
-        // once auto-filled, switching branches later while the form is still open
-        // would have no visible effect (the doc's own value would always "win").
-        let doc_branch_is_authoritative = !frm.is_new() || frm._cen_branch_user_set;
+        // it set (loaded from the DB), or a new doc given a branch other than the
+        // session's (see on_doc_branch_changed). A brand-new doc whose branch only
+        // ever matched the session must keep tracking the session -- otherwise
+        // switching branches later while the form is still open would have no
+        // visible effect (the doc's own value would always "win").
+        let doc_branch_is_authoritative = !frm.is_new() || cen_branch_management.get_doc_state(frm).branch_user_set;
 
         if (doc_branch_is_authoritative && doc_branch && doc_branch !== "All Branches") {
             let cached = cen_branch_management.branch_scope_cache[doc_branch];
@@ -153,6 +153,38 @@ Object.assign(window.cen_branch_management, {
         }
 
         return Promise.resolve(cen_branch_management.get_session_scope());
+    },
+
+    // Per-document bookkeeping for a form. Frappe keeps one form object per
+    // doctype and reuses it for every document opened in it, so anything stored
+    // straight on frm would leak from one document into the next.
+    get_doc_state: function(frm) {
+        if (!frm._cen_doc_state || frm._cen_doc_state.docname !== frm.docname) {
+            frm._cen_doc_state = { docname: frm.docname, filled_defaults: {} };
+        }
+        return frm._cen_doc_state;
+    },
+
+    // Change handler for a document's own branch field. Decides whether the doc
+    // now carries a deliberate branch of its own (see resolve_scope_for_form).
+    //
+    // A change event alone does not mean the user picked something: Frappe fires
+    // it for every pre-filled link field when a new document opens, and we fire
+    // it ourselves when auto-filling. So the value is what counts -- a branch
+    // that differs from the session's active one is the doc's own choice; one
+    // that matches it is just following the session and must keep doing so.
+    on_doc_branch_changed: function(frm, fieldname) {
+        // Our own auto-fill: the apply_sandbox_queries call that set it already
+        // has the right scope in hand, so there is nothing to re-resolve.
+        let state = cen_branch_management.get_doc_state(frm);
+        if (state.branch_programmatic_set) {
+            state.branch_programmatic_set = false;
+            return;
+        }
+
+        let value = frm.doc[fieldname];
+        state.branch_user_set = Boolean(value) && value !== cen_branch_management.get_active_branch();
+        cen_branch_management.apply_branch_scoping(frm);
     },
 
     // Resolves the effective scope for this form and applies it, guarded by a
@@ -187,7 +219,7 @@ Object.assign(window.cen_branch_management, {
         if (!frm.is_new()) return;
 
         scope = scope || {};
-        let filled = frm._cen_filled_defaults = frm._cen_filled_defaults || {};
+        let filled = cen_branch_management.get_doc_state(frm).filled_defaults;
         let wanted = {};
 
         if (scope.cen_branch_default_warehouse) {
@@ -262,11 +294,11 @@ Object.assign(window.cen_branch_management, {
                 frm.set_value("company", branch_company);
             }
             if (frm.fields_dict.custom_cen_branch && frm.doc.custom_cen_branch !== active_branch) {
-                frm._cen_branch_programmatic_set = true;
+                cen_branch_management.get_doc_state(frm).branch_programmatic_set = true;
                 frm.set_value("custom_cen_branch", active_branch);
             }
             if (frm.fields_dict.branch && frm.doc.branch !== active_branch) {
-                frm._cen_branch_programmatic_set = true;
+                cen_branch_management.get_doc_state(frm).branch_programmatic_set = true;
                 frm.set_value("branch", active_branch);
             }
 
@@ -403,6 +435,31 @@ Object.assign(window.cen_branch_management, {
         }
     },
 
+    // Re-applies the branch filters on a list that is already on screen (or was,
+    // before the user moved to a form). FilterArea.set() only adds filters -- it
+    // never removes one that is no longer wanted -- so the previous branch's
+    // filters are removed first. Clearing a standard filter field (e.g. Company)
+    // is asynchronous, so the new filters are only set once that has finished;
+    // otherwise the late clear wipes the company that was just set.
+    refresh_list_branch_filters: function(list) {
+        let area = list.filter_area;
+        if (!area || !area.remove || !area.set) {
+            list.refresh();
+            return;
+        }
+
+        let standard_fields = (list.page && list.page.fields_dict) || {};
+        let cleared = cen_branch_management.MANAGED_LIST_FILTER_FIELDS.map(fieldname => {
+            area.remove(fieldname);
+            return standard_fields[fieldname] ? standard_fields[fieldname].set_value("") : null;
+        });
+
+        Promise.all(cleared).then(() => {
+            list.filters = cen_branch_management.compute_list_view_branch_filters(list.doctype, list.filters);
+            return area.set(list.filters);
+        }).then(() => list.refresh());
+    },
+
     // List/Report View filtering, extracted so both the ListView prototype
     // patch below AND the post-switch soft-refresh (branch_switcher.js) can
     // call the exact same logic against an already-instantiated list.
@@ -471,27 +528,10 @@ cen_branch_management.get_form_doctypes().forEach(doctype => {
             cen_branch_management.apply_branch_scoping(frm);
         },
         branch: function(frm) {
-            // Distinguish "we just auto-filled this to match the session" from
-            // "the user actually picked this" -- see resolve_scope_for_form().
-            // The programmatic case is skipped entirely (not just un-flagged): the
-            // outer apply_sandbox_queries call that set this value already has the
-            // correct scope in hand, so re-resolving here would only be redundant
-            // (and, chained across several fields set in one pass, adds avoidable
-            // overlapping async churn for no benefit).
-            if (frm._cen_branch_programmatic_set) {
-                frm._cen_branch_programmatic_set = false;
-                return;
-            }
-            frm._cen_branch_user_set = true;
-            cen_branch_management.apply_branch_scoping(frm);
+            cen_branch_management.on_doc_branch_changed(frm, "branch");
         },
         custom_cen_branch: function(frm) {
-            if (frm._cen_branch_programmatic_set) {
-                frm._cen_branch_programmatic_set = false;
-                return;
-            }
-            frm._cen_branch_user_set = true;
-            cen_branch_management.apply_branch_scoping(frm);
+            cen_branch_management.on_doc_branch_changed(frm, "custom_cen_branch");
         }
     });
 
