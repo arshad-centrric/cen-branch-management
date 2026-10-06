@@ -64,8 +64,6 @@ def _sync_branch_permissions(branch):
     # lives on until no branch references it.
     for perm_name in _get_permissions_sourced_from(branch.name):
         perm_doc = frappe.get_doc("User Permission", perm_name)
-        if not perm_doc.custom_cen_from_branch_setup:
-            continue
 
         if not _is_still_granted(perm_doc, active_users, granted):
             _remove_branch_source(perm_doc, branch.name)
@@ -114,11 +112,27 @@ def _get_granted_values(branch):
 
 
 def _get_permissions_sourced_from(branch_name):
-    return set(
+    """Managed User Permissions that list this branch as a source.
+
+    Resolved against the User Permission table itself rather than trusting the
+    source rows alone: core's "Clear User Permissions" deletes permissions with
+    a plain SQL delete, which leaves their source rows behind.
+    """
+    referenced = set(
         frappe.get_all(
             "User Permission Source Branch",
             filters={"branch": branch_name, "parenttype": "User Permission"},
             pluck="parent",
+        )
+    )
+    if not referenced:
+        return set()
+
+    return set(
+        frappe.get_all(
+            "User Permission",
+            filters={"name": ["in", list(referenced)], "custom_cen_from_branch_setup": 1},
+            pluck="name",
         )
     )
 
