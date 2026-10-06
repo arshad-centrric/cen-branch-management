@@ -11,8 +11,10 @@ BRANCH_DEFAULT_KEYS = [
     "cen_branch_company",
     "cen_branch_warehouse",
     "cen_branch_warehouses",
+    "cen_branch_default_warehouse",
     "cen_branch_cost_center",
     "cen_branch_cost_centers",
+    "cen_branch_default_cost_center",
     "cen_branch_selling_price_lists",
     "cen_branch_buying_price_lists",
     "cen_branch_default_selling_price_list",
@@ -150,6 +152,11 @@ def _compute_branch_scope(branch_doc):
             cc_list = frappe.get_all("Cost Center", filters={"lft": [">=", cc_data.lft], "rgt": ["<=", cc_data.rgt], "is_group": 0}, pluck="name")
             if cc_list:
                 scope["cen_branch_cost_centers"] = ",".join(cc_list)
+
+    # Auto-fill values for transaction forms. Kept separate from the lists
+    # above, which only restrict what can be picked.
+    scope["cen_branch_default_warehouse"] = branch_doc.get("custom_cen_default_warehouse") or None
+    scope["cen_branch_default_cost_center"] = branch_doc.get("custom_cen_default_cost_center") or None
 
     selling_price_lists = set()
     for row in branch_doc.get("custom_cen_allowed_selling_price_lists", []):

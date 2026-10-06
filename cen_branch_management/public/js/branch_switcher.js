@@ -110,7 +110,7 @@ $(document).on('app_ready', function() {
 
                 // 4. Soft-refresh an open new/draft Form for a branch doctype.
                 //    Submitted docs are left untouched (apply_sandbox_queries already guards this).
-                if (window.cur_frm && cen_branch_management.branch_doctypes.includes(cur_frm.doctype)
+                if (window.cur_frm && cen_branch_management.get_form_doctypes().includes(cur_frm.doctype)
                     && (cur_frm.is_new() || cur_frm.doc.docstatus === 0)) {
                     cen_branch_management.apply_branch_scoping(cur_frm);
                 }

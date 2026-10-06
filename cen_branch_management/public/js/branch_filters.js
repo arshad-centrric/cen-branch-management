@@ -4,6 +4,7 @@ window.cen_branch_management = window.cen_branch_management || {};
 
 Object.assign(window.cen_branch_management, {
 
+    // Doctypes whose forms AND list views are branch-scoped.
     branch_doctypes: [
         "Lead",
         "Opportunity",
@@ -17,6 +18,50 @@ Object.assign(window.cen_branch_management, {
         "Journal Entry",
         "Payment Entry"
     ],
+
+    // Stock doctypes whose forms get the same scoping and branch defaults, but
+    // whose list views are left alone (they were never branch-filtered, and
+    // doing so would hide existing entries that carry no branch).
+    form_only_doctypes: [
+        "Stock Entry",
+        "Material Request"
+    ],
+
+    get_form_doctypes: function() {
+        return cen_branch_management.branch_doctypes.concat(cen_branch_management.form_only_doctypes);
+    },
+
+    // Header fields that take the branch's default warehouse. A function is
+    // given the doc, for doctypes where it depends on the kind of transaction.
+    default_warehouse_fields: {
+        "Sales Order": ["set_warehouse"],
+        "Sales Invoice": ["set_warehouse"],
+        "Delivery Note": ["set_warehouse"],
+        "Purchase Order": ["set_warehouse"],
+        "Purchase Receipt": ["set_warehouse"],
+        "Purchase Invoice": ["set_warehouse"],
+        "Material Request": ["set_warehouse"],
+        // The branch is where stock leaves from or arrives at, depending on the
+        // purpose. A transfer only gets its source: the target is another
+        // warehouse the user has to choose. Manufacture and the subcontracting
+        // purposes take their warehouses from the work/subcontracting order.
+        "Stock Entry": function(doc) {
+            let fields = [];
+            let from_branch = ["Material Issue", "Material Transfer", "Material Transfer for Manufacture",
+                "Material Consumption for Manufacture", "Send to Subcontractor", "Repack"];
+            let to_branch = ["Material Receipt", "Repack"];
+
+            if (from_branch.includes(doc.purpose)) fields.push("from_warehouse");
+            if (to_branch.includes(doc.purpose)) fields.push("to_warehouse");
+            return fields;
+        }
+    },
+
+    get_default_warehouse_fields: function(doc) {
+        let fields = cen_branch_management.default_warehouse_fields[doc.doctype];
+        if (typeof fields === "function") fields = fields(doc);
+        return fields || [];
+    },
 
     // branch name -> scope dict (same shape the server returns from
     // set_active_branch/get_branch_scope). Populated whenever a switch
@@ -64,8 +109,10 @@ Object.assign(window.cen_branch_management, {
             cen_branch_company: frappe.defaults.get_user_default("cen_branch_company"),
             cen_branch_warehouse: frappe.defaults.get_user_default("cen_branch_warehouse"),
             cen_branch_warehouses: frappe.defaults.get_user_default("cen_branch_warehouses"),
+            cen_branch_default_warehouse: frappe.defaults.get_user_default("cen_branch_default_warehouse"),
             cen_branch_cost_center: frappe.defaults.get_user_default("cen_branch_cost_center"),
             cen_branch_cost_centers: frappe.defaults.get_user_default("cen_branch_cost_centers"),
+            cen_branch_default_cost_center: frappe.defaults.get_user_default("cen_branch_default_cost_center"),
             cen_branch_selling_price_lists: frappe.defaults.get_user_default("cen_branch_selling_price_lists"),
             cen_branch_buying_price_lists: frappe.defaults.get_user_default("cen_branch_buying_price_lists"),
             cen_branch_default_selling_price_list: frappe.defaults.get_user_default("cen_branch_default_selling_price_list"),
@@ -119,6 +166,77 @@ Object.assign(window.cen_branch_management, {
         cen_branch_management.resolve_scope_for_form(frm).then(scope => {
             if (token !== frm._cen_scope_token) return;
             cen_branch_management.apply_sandbox_queries(frm, scope);
+            cen_branch_management.apply_branch_defaults(frm, scope);
+        });
+    },
+
+    // The scope a form is using right now, without a server call: for the
+    // per-row handlers below, which fire too often to wait on a request.
+    get_cached_scope_for_form: function(frm) {
+        let doc_branch = frm.doc.custom_cen_branch || frm.doc.branch;
+        return (doc_branch && cen_branch_management.branch_scope_cache[doc_branch]) || cen_branch_management.get_session_scope();
+    },
+
+    // Fills the branch's default warehouse and cost center on a new document.
+    // Only empty fields are filled, so anything the user (or ERPNext) put there
+    // is kept. A value this function filled earlier is tracked and still counts
+    // as "ours": it is replaced when the branch is switched while the form is
+    // open, and cleared when it stops applying (no active branch, or a Stock
+    // Entry purpose that no longer uses that warehouse field).
+    apply_branch_defaults: function(frm, scope) {
+        if (!frm.is_new()) return;
+
+        scope = scope || {};
+        let filled = frm._cen_filled_defaults = frm._cen_filled_defaults || {};
+        let wanted = {};
+
+        if (scope.cen_branch_default_warehouse) {
+            cen_branch_management.get_default_warehouse_fields(frm.doc).forEach(fieldname => {
+                wanted[fieldname] = scope.cen_branch_default_warehouse;
+            });
+        }
+        if (scope.cen_branch_default_cost_center) {
+            wanted.cost_center = scope.cen_branch_default_cost_center;
+        }
+
+        new Set(Object.keys(filled).concat(Object.keys(wanted))).forEach(fieldname => {
+            if (!frm.fields_dict[fieldname]) return;
+
+            let current = frm.doc[fieldname];
+            let is_ours = Boolean(current) && current === filled[fieldname];
+
+            if (current && !is_ours) {
+                delete filled[fieldname];
+                return;
+            }
+
+            if (wanted[fieldname]) {
+                filled[fieldname] = wanted[fieldname];
+                if (current !== wanted[fieldname]) frm.set_value(fieldname, wanted[fieldname]);
+            } else {
+                delete filled[fieldname];
+                if (is_ours) frm.set_value(fieldname, null);
+            }
+        });
+
+        (frm.doc.items || []).forEach(row => cen_branch_management.fill_item_row_defaults(frm, row, scope));
+    },
+
+    // A row that has no item yet gets the branch defaults, so ERPNext's item
+    // details logic starts from them once an item is chosen. Rows that already
+    // have an item are left exactly as they are.
+    fill_item_row_defaults: function(frm, row, scope) {
+        if (!scope || !frm.is_new() || row.item_code) return;
+
+        let defaults = {
+            warehouse: cen_branch_management.get_default_warehouse_fields(frm.doc).length ? scope.cen_branch_default_warehouse : null,
+            cost_center: scope.cen_branch_default_cost_center
+        };
+
+        Object.keys(defaults).forEach(fieldname => {
+            if (defaults[fieldname] && !row[fieldname] && frappe.meta.has_field(row.doctype, fieldname)) {
+                frappe.model.set_value(row.doctype, row.name, fieldname, defaults[fieldname]);
+            }
         });
     },
 
@@ -327,7 +445,7 @@ Object.assign(window.cen_branch_management, {
 
 });
 
-cen_branch_management.branch_doctypes.forEach(doctype => {
+cen_branch_management.get_form_doctypes().forEach(doctype => {
     frappe.ui.form.on(doctype, {
         onload: function(frm) {
             cen_branch_management.apply_branch_scoping(frm);
@@ -342,6 +460,14 @@ cen_branch_management.branch_doctypes.forEach(doctype => {
             cen_branch_management.apply_branch_scoping(frm);
         },
         supplier: function(frm) {
+            cen_branch_management.apply_branch_scoping(frm);
+        },
+        // Stock Entry: the purpose decides which warehouse field the branch
+        // default goes into (see default_warehouse_fields).
+        purpose: function(frm) {
+            cen_branch_management.apply_branch_scoping(frm);
+        },
+        stock_entry_type: function(frm) {
             cen_branch_management.apply_branch_scoping(frm);
         },
         branch: function(frm) {
@@ -410,17 +536,21 @@ const child_doctypes = [
     "Purchase Order Item",
     "Purchase Invoice Item",
     "Delivery Note Item",
-    "Purchase Receipt Item"
+    "Purchase Receipt Item",
+    "Material Request Item",
+    "Stock Entry Detail"
 ];
 
 child_doctypes.forEach(child_doctype => {
     frappe.ui.form.on(child_doctype, {
+        items_add: function(frm, cdt, cdn) {
+            cen_branch_management.fill_item_row_defaults(frm, frappe.get_doc(cdt, cdn), cen_branch_management.get_cached_scope_for_form(frm));
+        },
         warehouse: function(frm, cdt, cdn) {
             let row = frappe.get_doc(cdt, cdn);
             if (!row.warehouse) return;
 
-            let doc_branch = frm.doc.custom_cen_branch || frm.doc.branch;
-            let scope = (doc_branch && cen_branch_management.branch_scope_cache[doc_branch]) || cen_branch_management.get_session_scope();
+            let scope = cen_branch_management.get_cached_scope_for_form(frm);
             let branch_warehouses = scope && scope.cen_branch_warehouses;
 
             if (branch_warehouses) {
@@ -428,8 +558,11 @@ child_doctypes.forEach(child_doctype => {
 
                 // If ERPNext's native trigger forced a warehouse outside the branch's scope
                 if (!allowed_warehouses.includes(row.warehouse)) {
-                    // Forcefully overwrite it with the branch's primary warehouse
-                    frappe.model.set_value(cdt, cdn, 'warehouse', allowed_warehouses[0]);
+                    // Forcefully overwrite it with the branch's default warehouse,
+                    // or the first branch warehouse when no default is configured
+                    let default_warehouse = scope.cen_branch_default_warehouse;
+                    let replacement = allowed_warehouses.includes(default_warehouse) ? default_warehouse : allowed_warehouses[0];
+                    frappe.model.set_value(cdt, cdn, 'warehouse', replacement);
 
                     frappe.show_alert({
                         message: __('Warehouse automatically updated to match your branch.'),
