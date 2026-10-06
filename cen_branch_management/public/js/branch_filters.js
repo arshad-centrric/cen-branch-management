@@ -57,6 +57,69 @@ Object.assign(window.cen_branch_management, {
         }
     },
 
+    // Address fields that hold one of the COMPANY's addresses, per doctype, as
+    // defined in the installed ERPNext. Customer and supplier address fields
+    // (customer_address, shipping_address_name, supplier_address, and buying's
+    // dispatch_address, which is the supplier's) are deliberately not listed.
+    company_address_fields: {
+        "Quotation": ["company_address"],
+        "Sales Order": ["company_address", "dispatch_address_name"],
+        "Sales Invoice": ["company_address", "dispatch_address_name"],
+        "Delivery Note": ["company_address", "dispatch_address_name"],
+        "Purchase Order": ["billing_address", "shipping_address"],
+        "Purchase Invoice": ["billing_address", "shipping_address"],
+        "Purchase Receipt": ["billing_address", "shipping_address"]
+    },
+
+    // Field on Address that says which branch a company address belongs to.
+    ADDRESS_BRANCH_FIELD: "custom_cen_address_branch",
+
+    // Narrows the company address fields to the addresses of the document's
+    // effective branch. ERPNext's own query stays in charge: ours wraps it and
+    // only adds the branch when ERPNext is asking for the company's addresses,
+    // so the cases where it deliberately is not (drop-ship, or a buying shipping
+    // address for a customer) keep working, and with no branch (All Branches)
+    // the result is ERPNext's query untouched.
+    //
+    // The branch is read when the dropdown opens, from the scope last applied to
+    // this document, so nothing has to be re-set when the branch field, the
+    // company or the top-bar switcher changes: those all re-apply the scope.
+    // The wrap is repeated on every apply because ERPNext may set its query
+    // again; a field that is already wrapped is skipped.
+    apply_branch_address_queries: function(frm) {
+        (cen_branch_management.company_address_fields[frm.doctype] || []).forEach(fieldname => {
+            let field = frm.fields_dict[fieldname];
+            if (!field || (field.get_query && field.get_query._cen_branch_wrapped)) return;
+
+            let erpnext_query = field.get_query;
+            let wrapped = function() {
+                let query = erpnext_query ? erpnext_query.apply(this, arguments) : null;
+                return cen_branch_management.add_branch_to_address_query(frm, query);
+            };
+            wrapped._cen_branch_wrapped = true;
+            field.get_query = wrapped;
+        });
+    },
+
+    add_branch_to_address_query: function(frm, query) {
+        let scope = cen_branch_management.get_doc_state(frm).scope;
+        if (!scope || !scope.branch) return query;
+
+        if (!query) {
+            query = {
+                query: "frappe.contacts.doctype.address.address.address_query",
+                filters: { link_doctype: "Company", link_name: frm.doc.company || "" }
+            };
+        }
+
+        let filters = query.filters;
+        if (!filters || Array.isArray(filters) || filters.link_doctype !== "Company") return query;
+
+        let branch_filters = Object.assign({}, filters);
+        branch_filters[cen_branch_management.ADDRESS_BRANCH_FIELD] = scope.branch;
+        return Object.assign({}, query, { filters: branch_filters });
+    },
+
     get_default_warehouse_fields: function(doc) {
         let fields = cen_branch_management.default_warehouse_fields[doc.doctype];
         if (typeof fields === "function") fields = fields(doc);
@@ -197,8 +260,10 @@ Object.assign(window.cen_branch_management, {
 
         cen_branch_management.resolve_scope_for_form(frm).then(scope => {
             if (token !== frm._cen_scope_token) return;
+            cen_branch_management.get_doc_state(frm).scope = scope;
             cen_branch_management.apply_sandbox_queries(frm, scope);
             cen_branch_management.apply_branch_defaults(frm, scope);
+            cen_branch_management.apply_branch_address_queries(frm);
         });
     },
 
