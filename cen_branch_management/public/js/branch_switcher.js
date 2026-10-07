@@ -44,7 +44,7 @@ $(document).on('app_ready', function() {
         }
 
         return `
-            <div class="cen-branch-switcher-container dropdown" style="margin-right: 10px; display: inline-block;">
+            <div class="cen-branch-switcher-container dropdown" data-active-branch="${frappe.utils.escape_html(data.active_branch || '')}" style="margin-right: 10px; display: inline-block;">
                 <button type="button" class="btn btn-default btn-sm" data-toggle="dropdown" aria-expanded="false" style="display: flex; align-items: center; gap: 6px; box-shadow: var(--shadow-sm);">
                     <span class="hidden-xs actions-btn-group-label" style="font-weight: 500;">${data.active_branch || 'Select Branch'}</span>
                     <svg class="icon icon-xs"><use href="#icon-select"></use></svg>
@@ -57,7 +57,7 @@ $(document).on('app_ready', function() {
     }
 
     function handle_switch(selected_branch, data) {
-        if (!selected_branch || selected_branch === data.active_branch) return;
+        if (!selected_branch || selected_branch === (cen_branch_management.get_active_branch() || "All Branches")) return;
 
         let my_token = ++switch_token;
 
@@ -89,28 +89,12 @@ $(document).on('app_ready', function() {
                 // 3. Soft-refresh an open List/Report View for a branch doctype
                 //    (Report View extends ListView, so this covers both automatically).
                 if (window.cur_list && cen_branch_management.branch_doctypes.includes(cur_list.doctype)) {
-                    // FilterArea.set() only adds filters (it skips ones that already
-                    // exist, but never removes one that's no longer wanted), so the
-                    // previous branch's filter has to be explicitly removed first --
-                    // otherwise repeated switches stack up multiple "Branch = X" chips
-                    // instead of replacing the old one.
-                    if (cur_list.filter_area && cur_list.filter_area.remove) {
-                        cen_branch_management.MANAGED_LIST_FILTER_FIELDS.forEach(fieldname => {
-                            cur_list.filter_area.remove(fieldname);
-                        });
-                    }
-
-                    cur_list.filters = cen_branch_management.compute_list_view_branch_filters(cur_list.doctype, cur_list.filters);
-                    if (cur_list.filter_area && cur_list.filter_area.set) {
-                        cur_list.filter_area.set(cur_list.filters);
-                    } else {
-                        cur_list.refresh();
-                    }
+                    cen_branch_management.refresh_list_branch_filters(cur_list);
                 }
 
                 // 4. Soft-refresh an open new/draft Form for a branch doctype.
                 //    Submitted docs are left untouched (apply_sandbox_queries already guards this).
-                if (window.cur_frm && cen_branch_management.branch_doctypes.includes(cur_frm.doctype)
+                if (window.cur_frm && cen_branch_management.get_form_doctypes().includes(cur_frm.doctype)
                     && (cur_frm.is_new() || cur_frm.doc.docstatus === 0)) {
                     cen_branch_management.apply_branch_scoping(cur_frm);
                 }
@@ -154,9 +138,18 @@ $(document).on('app_ready', function() {
 
             let data = r.message;
 
+            // Every page keeps its own copy of the switcher, and a switch only
+            // re-renders the one on the page being looked at. So besides adding
+            // it where it is missing, replace a copy that still shows the branch
+            // that was active when that page was last visible.
             function tryInjecting() {
                 let $page_actions = $('.page-container:visible .page-actions').first();
-                if ($page_actions.length && $page_actions.find('.cen-branch-switcher-container').length === 0) {
+                if (!$page_actions.length) return false;
+
+                let $existing = $page_actions.find('.cen-branch-switcher-container');
+                let active_branch = cen_branch_management.get_active_branch() || "All Branches";
+
+                if ($existing.length === 0 || $existing.attr('data-active-branch') !== active_branch) {
                     return render_switcher(data);
                 }
                 return false;
