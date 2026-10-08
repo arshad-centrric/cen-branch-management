@@ -77,12 +77,16 @@ def make_user():
     return doc.name
 
 
-def make_branch(company=None, users=None, item_groups=None, **fields):
+def make_branch(company=None, users=None, item_groups=None, default_users=None, **fields):
+    """`default_users` are added to the branch's users with "Is Default" ticked."""
+    user_rows = [{"user": user} for user in users or []]
+    user_rows += [{"user": user, "is_default": 1} for user in default_users or []]
+
     doc = frappe.get_doc({
         "doctype": "Branch",
         "branch": unique("Branch"),
         "custom_cen_default_company": company,
-        "custom_cen_branch_users": [{"user": user} for user in users or []],
+        "custom_cen_branch_users": user_rows,
         "custom_cen_allowed_item_groups": [{"item_group": group} for group in item_groups or []],
         **fields,
     })
