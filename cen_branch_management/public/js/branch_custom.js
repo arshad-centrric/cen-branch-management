@@ -56,6 +56,24 @@ frappe.ui.form.on("Branch", {
             });
         });
 
+        // Addresses of the branch's company that are free or already this branch's.
+        // "Empty or this branch" is more than a plain filter can say, hence the
+        // server-side query. The server re-checks the choice on save.
+        frm.set_query("custom_cen_branch_address", function() {
+            if (!frm.doc.custom_cen_default_company) {
+                frm.scroll_to_field("custom_cen_default_company");
+                frappe.show_alert({ message: __("Please set Company first."), indicator: "orange" });
+            }
+
+            return {
+                query: "cen_branch_management.api.address.branch_address_query",
+                filters: {
+                    company: frm.doc.custom_cen_default_company || "",
+                    branch: frm.is_new() ? (frm.doc.branch || "") : frm.doc.name
+                }
+            };
+        });
+
         frm.set_query("item_group", "custom_cen_allowed_item_groups", function(doc, cdt, cdn) {
             let already_added = (doc.custom_cen_allowed_item_groups || [])
                 .filter(row => row.name !== cdn && row.item_group)
@@ -119,6 +137,7 @@ frappe.ui.form.on("Branch", {
         CEN_BRANCH_TREE_DEFAULTS.forEach(config => {
             if (frm.doc[config.default_field]) frm.set_value(config.default_field, null);
         });
+        if (frm.doc.custom_cen_branch_address) frm.set_value("custom_cen_branch_address", null);
     },
     custom_cen_warehouse_parent: function(frm) {
         cen_parent_changed(frm, "custom_cen_warehouse_parent");

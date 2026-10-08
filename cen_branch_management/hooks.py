@@ -148,8 +148,16 @@ doc_events = {
             "cen_branch_management.overrides.branch_validation.validate_default_branch",
             "cen_branch_management.overrides.branch_validation.validate_default_warehouse_and_cost_center",
             "cen_branch_management.overrides.branch_validation.validate_allowed_item_groups",
+            "cen_branch_management.overrides.branch_address.validate_branch_address",
         ],
-        "on_update": "cen_branch_management.api.permissions.sync_permissions_on_update"
+        "on_update": [
+            "cen_branch_management.api.permissions.sync_permissions_on_update",
+            "cen_branch_management.overrides.branch_address.sync_branch_address",
+        ],
+        "on_trash": "cen_branch_management.overrides.branch_address.release_branch_addresses"
+    },
+    "Address": {
+        "validate": "cen_branch_management.overrides.branch_address.validate_address_branch"
     },
     "User": {
         "on_update": "cen_branch_management.api.permissions.sync_permissions_on_user_update"

@@ -107,3 +107,21 @@ def managed_permissions(user, allow):
             )
         )
     return out
+
+
+def make_address(company=None, branch=None):
+    """An address, linked to `company` when given (which makes it a company address)."""
+    doc = frappe.get_doc({
+        "doctype": "Address",
+        "address_title": unique("Address"),
+        "address_type": "Office",
+        "address_line1": "1 Test Street",
+        "city": "Test City",
+        "country": frappe.db.get_value("Company", company or get_companies()[0], "country"),
+        "state": frappe.db.get_value("Address", {"state": ("is", "set")}, "state"),
+        "pincode": frappe.db.get_value("Address", {"pincode": ("is", "set")}, "pincode"),
+        "links": [{"link_doctype": "Company", "link_name": company}] if company else [],
+        "custom_cen_address_branch": branch,
+    })
+    doc.insert(ignore_permissions=True)
+    return doc.name

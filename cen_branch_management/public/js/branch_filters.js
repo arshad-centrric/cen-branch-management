@@ -57,6 +57,101 @@ Object.assign(window.cen_branch_management, {
         }
     },
 
+    // Address fields that hold one of the COMPANY's addresses, per doctype, as
+    // defined in the installed ERPNext. Customer and supplier address fields
+    // (customer_address, shipping_address_name, supplier_address, and buying's
+    // dispatch_address, which is the supplier's) are deliberately not listed.
+    company_address_fields: {
+        "Quotation": ["company_address"],
+        "Sales Order": ["company_address", "dispatch_address_name"],
+        "Sales Invoice": ["company_address", "dispatch_address_name"],
+        "Delivery Note": ["company_address", "dispatch_address_name"],
+        "Purchase Order": ["billing_address", "shipping_address"],
+        "Purchase Invoice": ["billing_address", "shipping_address"],
+        "Purchase Receipt": ["billing_address", "shipping_address"]
+    },
+
+    // The one field per doctype that takes the branch's Branch Address on a new
+    // document: the company's own billing address. ERPNext pre-fills it with
+    // the company's default address, which knows nothing about branches.
+    // (Buying's shipping_address is not filled: it can be a customer's.)
+    default_address_fields: {
+        "Quotation": "company_address",
+        "Sales Order": "company_address",
+        "Sales Invoice": "company_address",
+        "Delivery Note": "company_address",
+        "Purchase Order": "billing_address",
+        "Purchase Invoice": "billing_address",
+        "Purchase Receipt": "billing_address"
+    },
+
+    // Change handler for those fields. ERPNext fills them asynchronously, after
+    // our own pass has run, so its pick has to be looked at again here. A field
+    // the user emptied themselves is remembered and left empty.
+    //
+    // Our own write is recognised by its value, not by a "we are writing" flag:
+    // ERPNext's write and ours can land almost together, and a flag would then
+    // be consumed by the wrong one and let ERPNext's pick through.
+    on_default_address_changed: function(frm, fieldname) {
+        if (cen_branch_management.default_address_fields[frm.doctype] !== fieldname) return;
+
+        let state = cen_branch_management.get_doc_state(frm);
+        let value = frm.doc[fieldname] || "";
+        if (state.address_written !== undefined && value === state.address_written) return;
+
+        state.address_cleared_by_user = !value;
+        cen_branch_management.apply_branch_scoping(frm);
+    },
+
+    // Field on Address that says which branch a company address belongs to.
+    ADDRESS_BRANCH_FIELD: "custom_cen_address_branch",
+
+    // Narrows the company address fields to the addresses of the document's
+    // effective branch. ERPNext's own query stays in charge: ours wraps it and
+    // only adds the branch when ERPNext is asking for the company's addresses,
+    // so the cases where it deliberately is not (drop-ship, or a buying shipping
+    // address for a customer) keep working, and with no branch (All Branches)
+    // the result is ERPNext's query untouched.
+    //
+    // The branch is read when the dropdown opens, from the scope last applied to
+    // this document, so nothing has to be re-set when the branch field, the
+    // company or the top-bar switcher changes: those all re-apply the scope.
+    // The wrap is repeated on every apply because ERPNext may set its query
+    // again; a field that is already wrapped is skipped.
+    apply_branch_address_queries: function(frm) {
+        (cen_branch_management.company_address_fields[frm.doctype] || []).forEach(fieldname => {
+            let field = frm.fields_dict[fieldname];
+            if (!field || (field.get_query && field.get_query._cen_branch_wrapped)) return;
+
+            let erpnext_query = field.get_query;
+            let wrapped = function() {
+                let query = erpnext_query ? erpnext_query.apply(this, arguments) : null;
+                return cen_branch_management.add_branch_to_address_query(frm, query);
+            };
+            wrapped._cen_branch_wrapped = true;
+            field.get_query = wrapped;
+        });
+    },
+
+    add_branch_to_address_query: function(frm, query) {
+        let scope = cen_branch_management.get_doc_state(frm).scope;
+        if (!scope || !scope.branch) return query;
+
+        if (!query) {
+            query = {
+                query: "frappe.contacts.doctype.address.address.address_query",
+                filters: { link_doctype: "Company", link_name: frm.doc.company || "" }
+            };
+        }
+
+        let filters = query.filters;
+        if (!filters || Array.isArray(filters) || filters.link_doctype !== "Company") return query;
+
+        let branch_filters = Object.assign({}, filters);
+        branch_filters[cen_branch_management.ADDRESS_BRANCH_FIELD] = scope.branch;
+        return Object.assign({}, query, { filters: branch_filters });
+    },
+
     get_default_warehouse_fields: function(doc) {
         let fields = cen_branch_management.default_warehouse_fields[doc.doctype];
         if (typeof fields === "function") fields = fields(doc);
@@ -113,6 +208,8 @@ Object.assign(window.cen_branch_management, {
             cen_branch_cost_center: frappe.defaults.get_user_default("cen_branch_cost_center"),
             cen_branch_cost_centers: frappe.defaults.get_user_default("cen_branch_cost_centers"),
             cen_branch_default_cost_center: frappe.defaults.get_user_default("cen_branch_default_cost_center"),
+            cen_branch_default_address: frappe.defaults.get_user_default("cen_branch_default_address"),
+            cen_branch_addresses: frappe.defaults.get_user_default("cen_branch_addresses"),
             cen_branch_selling_price_lists: frappe.defaults.get_user_default("cen_branch_selling_price_lists"),
             cen_branch_buying_price_lists: frappe.defaults.get_user_default("cen_branch_buying_price_lists"),
             cen_branch_default_selling_price_list: frappe.defaults.get_user_default("cen_branch_default_selling_price_list"),
@@ -197,8 +294,10 @@ Object.assign(window.cen_branch_management, {
 
         cen_branch_management.resolve_scope_for_form(frm).then(scope => {
             if (token !== frm._cen_scope_token) return;
+            cen_branch_management.get_doc_state(frm).scope = scope;
             cen_branch_management.apply_sandbox_queries(frm, scope);
             cen_branch_management.apply_branch_defaults(frm, scope);
+            cen_branch_management.apply_branch_address_queries(frm);
         });
     },
 
@@ -231,23 +330,43 @@ Object.assign(window.cen_branch_management, {
             wanted.cost_center = scope.cen_branch_default_cost_center;
         }
 
+        // Branch Address. Unlike the fields above this one is never empty when
+        // we get to it -- ERPNext has already put the company's default address
+        // there -- so "only fill when empty" would never fire. An address that
+        // is not one of this branch's is therefore replaced as well; one that is
+        // (the user picked it from the branch-filtered dropdown) is kept.
+        let state = cen_branch_management.get_doc_state(frm);
+        let address_field = cen_branch_management.default_address_fields[frm.doctype];
+        let branch_addresses = (scope.cen_branch_addresses || "").split("\n").filter(Boolean);
+        if (address_field && scope.cen_branch_default_address && !state.address_cleared_by_user) {
+            wanted[address_field] = scope.cen_branch_default_address;
+        }
+
         new Set(Object.keys(filled).concat(Object.keys(wanted))).forEach(fieldname => {
             if (!frm.fields_dict[fieldname]) return;
 
+            let is_address = fieldname === address_field;
             let current = frm.doc[fieldname];
             let is_ours = Boolean(current) && current === filled[fieldname];
+            let is_foreign_address = is_address && Boolean(wanted[fieldname]) && !branch_addresses.includes(current);
 
-            if (current && !is_ours) {
+            if (current && !is_ours && !is_foreign_address) {
                 delete filled[fieldname];
                 return;
             }
 
             if (wanted[fieldname]) {
                 filled[fieldname] = wanted[fieldname];
-                if (current !== wanted[fieldname]) frm.set_value(fieldname, wanted[fieldname]);
+                if (current !== wanted[fieldname]) {
+                    if (is_address) state.address_written = wanted[fieldname];
+                    frm.set_value(fieldname, wanted[fieldname]);
+                }
             } else {
                 delete filled[fieldname];
-                if (is_ours) frm.set_value(fieldname, null);
+                if (is_ours) {
+                    if (is_address) state.address_written = "";
+                    frm.set_value(fieldname, null);
+                }
             }
         });
 
@@ -519,6 +638,10 @@ cen_branch_management.get_form_doctypes().forEach(doctype => {
         supplier: function(frm) {
             cen_branch_management.apply_branch_scoping(frm);
         },
+        // Quotation chooses its customer or lead through this field.
+        party_name: function(frm) {
+            cen_branch_management.apply_branch_scoping(frm);
+        },
         // Stock Entry: the purpose decides which warehouse field the branch
         // default goes into (see default_warehouse_fields).
         purpose: function(frm) {
@@ -526,6 +649,12 @@ cen_branch_management.get_form_doctypes().forEach(doctype => {
         },
         stock_entry_type: function(frm) {
             cen_branch_management.apply_branch_scoping(frm);
+        },
+        company_address: function(frm) {
+            cen_branch_management.on_default_address_changed(frm, "company_address");
+        },
+        billing_address: function(frm) {
+            cen_branch_management.on_default_address_changed(frm, "billing_address");
         },
         branch: function(frm) {
             cen_branch_management.on_doc_branch_changed(frm, "branch");

@@ -30,7 +30,9 @@ def add_custom_fields():
             {"fieldname": "custom_cen_cost_center_parent", "label": "Cost Center Parent", "fieldtype": "Link", "options": "Cost Center", "insert_after": "custom_cen_cost_center_section"},
             {"fieldname": "custom_cen_cost_center_col", "fieldtype": "Column Break", "insert_after": "custom_cen_cost_center_parent"},
             {"fieldname": "custom_cen_default_cost_center", "label": "Default Cost Center", "fieldtype": "Link", "options": "Cost Center", "insert_after": "custom_cen_cost_center_col"},
-            {"fieldname": "custom_cen_pricing_section", "label": "Configuration", "fieldtype": "Tab Break", "insert_after": "custom_cen_default_cost_center"},
+            {"fieldname": "custom_cen_address_section", "label": "Address", "fieldtype": "Section Break", "insert_after": "custom_cen_default_cost_center"},
+            {"fieldname": "custom_cen_branch_address", "label": "Branch Address", "fieldtype": "Link", "options": "Address", "insert_after": "custom_cen_address_section"},
+            {"fieldname": "custom_cen_pricing_section", "label": "Configuration", "fieldtype": "Tab Break", "insert_after": "custom_cen_branch_address"},
             {"fieldname": "custom_cen_default_selling_price_list", "label": "Default Selling Price List", "fieldtype": "Link", "options": "Price List", "insert_after": "custom_cen_pricing_section"},
             {"fieldname": "custom_cen_allowed_selling_price_lists", "label": "Allowed Selling Price Lists", "fieldtype": "Table", "options": "Branch Allowed Selling Price List", "insert_after": "custom_cen_default_selling_price_list"},
             {"fieldname": "custom_cen_pricing_col", "fieldtype": "Column Break", "insert_after": "custom_cen_allowed_selling_price_lists"},
@@ -52,6 +54,17 @@ def add_custom_fields():
         ],
         "Quotation": [
             {"fieldname": "custom_cen_branch", "label": "Branch", "fieldtype": "Link", "options": "Branch", "insert_after": "company", "in_standard_filter": 1}
+        ],
+        # Not named custom_cen_branch like the transaction fields: the switcher keeps
+        # the active branch as a user default under that key, and Frappe fills any
+        # new document's field from a same-named user default -- so every address a
+        # branch user creates (customer addresses included) would get their branch.
+        # ignore_user_permissions for the same reason: a user with a single Branch
+        # permission would otherwise get it pre-filled as well. An address only
+        # belongs to a branch when someone sets it.
+        "Address": [
+            {"fieldname": "custom_cen_address_branch", "label": "Branch", "fieldtype": "Link", "options": "Branch", "insert_after": "links", "in_standard_filter": 1, "ignore_user_permissions": 1,
+             "description": "Set for a company address that belongs to one branch. Transactions of that branch only offer its addresses."}
         ],
         "User Permission": [
             {"fieldname": "custom_cen_branch_setup_section", "label": "Branch Setup Details", "fieldtype": "Section Break", "insert_after": "apply_to_all_doctypes"},
