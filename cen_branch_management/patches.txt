@@ -6,3 +6,4 @@
 # Patches added in this section will be executed after doctypes are migrated
 cen_branch_management.patches.v0_0_2.add_branch_defaults_and_item_groups
 cen_branch_management.patches.v0_0_3.add_branch_address
+cen_branch_management.patches.v0_0_4.add_user_default_branch
