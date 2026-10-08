@@ -45,7 +45,7 @@ app_include_js = ["/assets/cen_branch_management/js/branch_filters.js", "/assets
 
 # include js in doctype views
 # doctype_js = {"doctype" : "public/js/doctype.js"}
-doctype_js = {"Branch" : "public/js/branch_custom.js"}
+doctype_js = {"Branch" : "public/js/branch_custom.js", "User": "public/js/user_custom.js"}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -153,13 +153,18 @@ doc_events = {
         "on_update": [
             "cen_branch_management.api.permissions.sync_permissions_on_update",
             "cen_branch_management.overrides.branch_address.sync_branch_address",
+            "cen_branch_management.overrides.user_default_branch.sync_default_branch_on_branch_update",
         ],
-        "on_trash": "cen_branch_management.overrides.branch_address.release_branch_addresses"
+        "on_trash": [
+            "cen_branch_management.overrides.branch_address.release_branch_addresses",
+            "cen_branch_management.overrides.user_default_branch.clear_default_branch_on_branch_trash",
+        ]
     },
     "Address": {
         "validate": "cen_branch_management.overrides.branch_address.validate_address_branch"
     },
     "User": {
+        "validate": "cen_branch_management.overrides.user_default_branch.validate_user_default_branch",
         "on_update": "cen_branch_management.api.permissions.sync_permissions_on_user_update"
     }
 }
