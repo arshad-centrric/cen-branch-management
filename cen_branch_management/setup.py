@@ -66,6 +66,15 @@ def add_custom_fields():
             {"fieldname": "custom_cen_address_branch", "label": "Branch", "fieldtype": "Link", "options": "Branch", "insert_after": "links", "in_standard_filter": 1, "ignore_user_permissions": 1,
              "description": "Set for a company address that belongs to one branch. Transactions of that branch only offer its addresses."}
         ],
+        # The one input for which branch a user lands on at login. The name matches
+        # none of the switcher's user-default keys (branch, custom_cen_branch,
+        # cen_branch_*), which Frappe would otherwise copy into it on new users;
+        # ignore_user_permissions stops the same pre-fill by doctype for an admin
+        # who has a single Branch permission.
+        "User": [
+            {"fieldname": "custom_cen_default_branch", "label": "Default Branch", "fieldtype": "Link", "options": "Branch", "insert_after": "time_zone", "ignore_user_permissions": 1,
+             "description": "The branch this user starts in after logging in. Leave empty to start on All Branches."}
+        ],
         "User Permission": [
             {"fieldname": "custom_cen_branch_setup_section", "label": "Branch Setup Details", "fieldtype": "Section Break", "insert_after": "apply_to_all_doctypes"},
             {"fieldname": "custom_cen_from_branch_setup", "label": "Created via Branch Setup", "fieldtype": "Check", "default": "0", "read_only": 1, "insert_after": "custom_cen_branch_setup_section"},
