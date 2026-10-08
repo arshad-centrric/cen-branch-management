@@ -2,6 +2,7 @@ import frappe
 from frappe.cache_manager import clear_defaults_cache
 
 from cen_branch_management.overrides.branch_address import ADDRESS_BRANCH_FIELD
+from cen_branch_management.overrides.user_default_branch import USER_DEFAULT_BRANCH_FIELD, is_branch_user
 
 # All user-default keys this app owns. Kept as one list so the write path
 # (apply/clear) and the read path (get_branch_scope) agree on exactly what
@@ -27,11 +28,42 @@ BRANCH_DEFAULT_KEYS = [
 
 
 def initialize_session_branch(login_manager):
-    # Every login starts unfiltered on "All Branches". Users switch explicitly
-    # from there; we no longer try to auto-restore/auto-pick a branch at login,
-    # since that relied on frappe.boot.user.defaults being refreshed before any
-    # list/form JS ran, which is not guaranteed on the very first page load.
-    clear_branch_context()
+    """on_login hook: decide the branch a user starts in. Their Default Branch
+    if it is still valid, otherwise All Branches -- nothing is remembered from
+    the previous session.
+
+    Frappe runs on_login before it creates the session, so frappe.session.user
+    is not the person logging in yet; the user has to be taken from the login
+    manager. Whatever is written here is in place before the browser asks for
+    its first page, so that page is already filtered and the switcher already
+    shows the branch. A page refresh never comes through here: only a login.
+
+    A problem in here must never keep anyone from logging in.
+    """
+    user = getattr(login_manager, "user", None)
+    if not user or user == "Guest":
+        return
+
+    try:
+        _set_active_branch(resolve_login_branch(user) or "All Branches", user)
+    except Exception:
+        frappe.log_error(title="Cen Branch Management: could not set the branch at login")
+        # Whatever was raised must not surface as a message on the login page.
+        frappe.clear_messages()
+        try:
+            clear_branch_context(user)
+        except Exception:
+            pass
+
+
+def resolve_login_branch(user):
+    """The user's Default Branch, if the branch still exists and the user is
+    still assigned to it. None means All Branches."""
+    branch = frappe.db.get_value("User", user, USER_DEFAULT_BRANCH_FIELD)
+    if not branch or not frappe.db.exists("Branch", branch) or not is_branch_user(user, branch):
+        return None
+
+    return branch
 
 
 @frappe.whitelist()
@@ -77,13 +109,21 @@ def get_user_branches():
 
 @frappe.whitelist()
 def set_active_branch(branch_name):
+    return _set_active_branch(branch_name, frappe.session.user)
+
+
+def _set_active_branch(branch_name, user):
+    """Make a branch (or "All Branches") the user's active one. The switcher
+    calls this for the session user; login calls it for the user logging in,
+    who has no session yet. Not whitelisted: a client must never pick the user.
+    """
     if branch_name == "All Branches":
-        scope = clear_branch_context()
+        scope = clear_branch_context(user)
     else:
-        if not frappe.db.exists("Branch User", {"user": frappe.session.user, "parent": branch_name}):
+        if not frappe.db.exists("Branch User", {"user": user, "parent": branch_name}):
             frappe.throw("You do not have permission to access this branch.")
 
-        scope = apply_branch_context(branch_name)
+        scope = apply_branch_context(branch_name, user)
 
     # The caller (navbar switcher) gets the full scope back so it can patch its
     # own client-side state directly instead of reloading the page to pick up
@@ -116,16 +156,16 @@ def get_branch_scope(branch_name):
     return _compute_branch_scope(branch_doc)
 
 
-def clear_branch_context():
+def clear_branch_context(user=None):
     scope = dict.fromkeys(BRANCH_DEFAULT_KEYS)
-    _write_user_defaults(scope)
+    _write_user_defaults(scope, user)
     return scope
 
 
-def apply_branch_context(branch_name):
+def apply_branch_context(branch_name, user=None):
     branch_doc = frappe.get_doc("Branch", branch_name)
     scope = _compute_branch_scope(branch_doc)
-    _write_user_defaults(scope)
+    _write_user_defaults(scope, user)
     return scope
 
 
@@ -198,7 +238,7 @@ def _compute_branch_scope(branch_doc):
     return scope
 
 
-def _write_user_defaults(scope):
+def _write_user_defaults(scope, user=None):
     """Batched replacement for what used to be up to 11 individual
     frappe.defaults.set_user_default()/clear_default() calls.
 
@@ -219,7 +259,7 @@ def _write_user_defaults(scope):
       after a hard refresh -- without paying for a full rebuild right now; that
       rebuild is deferred to whenever this user's next full page load happens.
     """
-    user = frappe.session.user
+    user = user or frappe.session.user
     now = frappe.utils.now()
 
     frappe.db.delete("DefaultValue", {"parent": user, "defkey": ["in", list(scope.keys())]})
