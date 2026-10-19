@@ -1,6 +1,7 @@
 import frappe
 from frappe.cache_manager import clear_defaults_cache
 
+from cen_branch_management.api.warehouse_access import get_user_branch_warehouses, get_user_default_warehouse
 from cen_branch_management.overrides.branch_address import ADDRESS_BRANCH_FIELD
 from cen_branch_management.overrides.user_default_branch import USER_DEFAULT_BRANCH_FIELD, is_branch_user
 
@@ -153,7 +154,7 @@ def get_branch_scope(branch_name):
         return dict.fromkeys(BRANCH_DEFAULT_KEYS)
 
     branch_doc = frappe.get_doc("Branch", branch_name)
-    return _compute_branch_scope(branch_doc)
+    return _compute_branch_scope(branch_doc, frappe.session.user)
 
 
 def clear_branch_context(user=None):
@@ -164,16 +165,21 @@ def clear_branch_context(user=None):
 
 def apply_branch_context(branch_name, user=None):
     branch_doc = frappe.get_doc("Branch", branch_name)
-    scope = _compute_branch_scope(branch_doc)
+    scope = _compute_branch_scope(branch_doc, user or frappe.session.user)
     _write_user_defaults(scope, user)
     return scope
 
 
-def _compute_branch_scope(branch_doc):
-    """Pure: derive the full scope dict for a branch. No defaults are written
-    and no cache is touched here -- this is the single source of truth for
-    "what a branch means", shared by the write path (apply_branch_context) and
-    the read-only path (get_branch_scope) so the two can never drift apart.
+def _compute_branch_scope(branch_doc, user):
+    """Pure: derive the full scope dict for a branch, as seen by this user. No
+    defaults are written and no cache is touched here -- this is the single
+    source of truth for "what a branch means", shared by the write path
+    (apply_branch_context) and the read-only path (get_branch_scope) so the two
+    can never drift apart.
+
+    Everything is the same for every user of the branch except the warehouses:
+    a user restricted on the branch (Restricted Warehouses) only gets theirs,
+    and their default warehouse follows (see api/warehouse_access.py).
     """
     scope = dict.fromkeys(BRANCH_DEFAULT_KEYS)
 
@@ -181,13 +187,11 @@ def _compute_branch_scope(branch_doc):
     scope["custom_cen_branch"] = branch_doc.name
     scope["cen_branch_company"] = branch_doc.custom_cen_default_company or None
 
+    warehouses = get_user_branch_warehouses(branch_doc, user)
     if branch_doc.custom_cen_warehouse_parent:
         scope["cen_branch_warehouse"] = branch_doc.custom_cen_warehouse_parent
-        wh_data = frappe.db.get_value("Warehouse", branch_doc.custom_cen_warehouse_parent, ["lft", "rgt"], as_dict=True)
-        if wh_data:
-            wh_list = frappe.get_all("Warehouse", filters={"lft": [">=", wh_data.lft], "rgt": ["<=", wh_data.rgt], "is_group": 0}, pluck="name")
-            if wh_list:
-                scope["cen_branch_warehouses"] = ",".join(wh_list)
+        if warehouses:
+            scope["cen_branch_warehouses"] = ",".join(warehouses)
 
     if branch_doc.custom_cen_cost_center_parent:
         scope["cen_branch_cost_center"] = branch_doc.custom_cen_cost_center_parent
@@ -199,7 +203,7 @@ def _compute_branch_scope(branch_doc):
 
     # Auto-fill values for transaction forms. Kept separate from the lists
     # above, which only restrict what can be picked.
-    scope["cen_branch_default_warehouse"] = branch_doc.get("custom_cen_default_warehouse") or None
+    scope["cen_branch_default_warehouse"] = get_user_default_warehouse(branch_doc, user, warehouses)
     scope["cen_branch_default_cost_center"] = branch_doc.get("custom_cen_default_cost_center") or None
 
     # The Branch Address is filled into the company address of new documents;

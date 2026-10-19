@@ -1,5 +1,7 @@
 import frappe
 
+from cen_branch_management.api.warehouse_access import get_user_warehouse_roots
+
 # Everything a branch grants its users, as User Permission "allow" doctypes.
 # A managed permission of any other type that still points at a branch (e.g.
 # Cost Center, which branch setup created in the past and no longer does) is
@@ -57,7 +59,7 @@ def _sync_is_suspended():
 
 def _sync_branch_permissions(branch):
     active_users = _get_active_branch_users(branch)
-    granted = _get_granted_values(branch)
+    granted_for = {user: _get_granted_values(branch, user) for user in active_users}
 
     # 1. Ghost Cleanup: only permissions that this branch is a source of. One
     # that another branch also grants just loses this branch's reference and
@@ -65,11 +67,11 @@ def _sync_branch_permissions(branch):
     for perm_name in _get_permissions_sourced_from(branch.name):
         perm_doc = frappe.get_doc("User Permission", perm_name)
 
-        if not _is_still_granted(perm_doc, active_users, granted):
+        if not _is_still_granted(perm_doc, granted_for):
             _remove_branch_source(perm_doc, branch.name)
 
     # 2. Active User Sync
-    for user in active_users:
+    for user, granted in granted_for.items():
         for allow, values in granted.items():
             for for_value in values:
                 _grant(user, allow, for_value, branch.name)
@@ -83,8 +85,12 @@ def _get_active_branch_users(branch):
     return set(frappe.get_all("User", filters={"name": ["in", list(users)], "enabled": 1}, pluck="name"))
 
 
-def _get_granted_values(branch):
-    """allow doctype -> the values this branch permits its users.
+def _get_granted_values(branch, user):
+    """allow doctype -> the values this branch permits the user.
+
+    Warehouse: the user's Restricted Warehouses on the branch, else the
+    Warehouse Parent (see api/warehouse_access.py). As with Item Group, a
+    permission on a group warehouse covers everything under it.
 
     Item Group: only the groups listed on the branch. A User Permission on a
     tree doctype already covers the node's descendants, so child groups are not
@@ -103,7 +109,7 @@ def _get_granted_values(branch):
     granted = {
         "Branch": {branch.name},
         "Company": {branch.get("custom_cen_default_company")},
-        "Warehouse": {branch.get("custom_cen_warehouse_parent")},
+        "Warehouse": set(get_user_warehouse_roots(branch, user)),
         "Price List": price_lists,
         "Item Group": {row.item_group for row in branch.get("custom_cen_allowed_item_groups") or []},
     }
@@ -137,16 +143,20 @@ def _get_permissions_sourced_from(branch_name):
     )
 
 
-def _is_still_granted(perm_doc, active_users, granted):
-    if perm_doc.user not in active_users:
+def _is_still_granted(perm_doc, granted_for):
+    granted = granted_for.get(perm_doc.user)
+    if granted is None:
+        # Not (or no longer) an enabled user of this branch.
         return False
 
     if perm_doc.allow not in MANAGED_PERMISSION_TYPES:
         return False
 
-    # A group taken off the branch's Allowed Item Groups stops being granted.
-    if perm_doc.allow == "Item Group":
-        return perm_doc.for_value in granted["Item Group"]
+    # A group taken off the branch's Allowed Item Groups stops being granted;
+    # so does a warehouse the user is no longer allowed (narrowed to particular
+    # warehouses, widened back, or the Warehouse Parent changed).
+    if perm_doc.allow in ("Item Group", "Warehouse"):
+        return perm_doc.for_value in granted[perm_doc.allow]
 
     return True
 
