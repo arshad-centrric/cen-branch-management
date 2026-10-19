@@ -2,7 +2,12 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from cen_branch_management.api import switcher
-from cen_branch_management.api.warehouse_access import get_user_branch_warehouses, get_user_default_warehouse
+from cen_branch_management.api.warehouse_access import (
+    get_tree_bounds,
+    get_user_branch_warehouses,
+    get_user_default_warehouse,
+    get_warehouses_under,
+)
 from cen_branch_management.tests import utils
 
 FIELD = "custom_cen_user_warehouses"
@@ -191,3 +196,27 @@ class TestBranchUserWarehouses(IntegrationTestCase):
         self.assertEqual(scope["cen_branch_warehouses"].split(","), sorted([self.a, self.b, self.d]))
         self.assertEqual(scope["cen_branch_default_warehouse"], self.a)
         self.assertEqual(scope["cen_branch_warehouse"], self.parent)
+
+    # Branch form lookups
+
+    def test_branch_editors_get_the_warehouse_tree_without_warehouse_access(self):
+        # Administrator here; the point is that it goes through Branch write
+        # access rather than Warehouse read access.
+        names = [w.name for w in get_warehouses_under(self.parent)]
+
+        self.assertEqual(set(names), {self.a, self.b, self.sub, self.d})
+        self.assertNotIn(self.parent, names)
+        self.assertEqual(set(get_tree_bounds("Warehouse", self.parent)), {"lft", "rgt"})
+
+    def test_tree_lookups_refuse_people_who_cannot_edit_branches(self):
+        outsider = utils.make_user()
+        frappe.set_user(outsider)
+
+        with self.assertRaises(frappe.PermissionError):
+            get_warehouses_under(self.parent)
+        with self.assertRaises(frappe.PermissionError):
+            get_tree_bounds("Warehouse", self.parent)
+
+    def test_tree_lookups_only_answer_for_warehouse_and_cost_center(self):
+        with self.assertRaises(frappe.PermissionError):
+            get_tree_bounds("Item Group", "All Item Groups")

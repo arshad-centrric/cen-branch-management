@@ -82,3 +82,41 @@ def get_warehouse_access_summary(branch, user):
 
 def _get_branch(branch):
     return frappe.get_doc("Branch", branch) if isinstance(branch, str) else branch
+
+
+# Branch form lookups. People who may edit branches (Supervisor, Sales Person,
+# System Manager...) can lack read access to Warehouse or Cost Center, so the
+# form can't query those trees itself. These are read-only and only answer for
+# someone who may edit a Branch.
+TREE_DOCTYPES = ("Warehouse", "Cost Center")
+
+
+@frappe.whitelist()
+def get_tree_bounds(doctype, name):
+    """lft/rgt of a Warehouse or Cost Center, for the Branch form's
+    Default Warehouse / Default Cost Center filters."""
+    _check_can_edit_branches(doctype)
+    return frappe.db.get_value(doctype, name, ["lft", "rgt"], as_dict=True)
+
+
+@frappe.whitelist()
+def get_warehouses_under(parent):
+    """The warehouses under a Warehouse Parent, in tree order, for the
+    Branch form's Warehouses dialog."""
+    _check_can_edit_branches("Warehouse")
+    bounds = frappe.db.get_value("Warehouse", parent, ["lft", "rgt"], as_dict=True)
+    if not bounds:
+        return []
+
+    return frappe.get_all(
+        "Warehouse",
+        filters={"lft": [">", bounds.lft], "rgt": ["<", bounds.rgt]},
+        fields=["name", "is_group", "lft", "rgt", "parent_warehouse"],
+        order_by="lft asc",
+    )
+
+
+def _check_can_edit_branches(doctype):
+    if doctype not in TREE_DOCTYPES:
+        frappe.throw(frappe._("Not allowed for {0}.").format(doctype), frappe.PermissionError)
+    frappe.has_permission("Branch", "write", throw=True)

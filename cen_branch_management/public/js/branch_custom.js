@@ -18,9 +18,10 @@ function cen_load_parent_bounds(frm, config) {
         return;
     }
 
-    frappe.db.get_value(config.doctype, parent, ["lft", "rgt"]).then(r => {
-        if (r && r.message && frm.doc[config.parent_field] === parent) {
-            frm._cen_parent_bounds[config.parent_field] = { parent: parent, lft: r.message.lft, rgt: r.message.rgt };
+    // Server-side: someone who may edit branches can lack read access to the tree itself.
+    frappe.xcall("cen_branch_management.api.warehouse_access.get_tree_bounds", { doctype: config.doctype, name: parent }).then(bounds => {
+        if (bounds && frm.doc[config.parent_field] === parent) {
+            frm._cen_parent_bounds[config.parent_field] = { parent: parent, lft: bounds.lft, rgt: bounds.rgt };
         }
     });
 }
@@ -281,15 +282,8 @@ function cen_open_warehouse_dialog(frm, branch_user_row) {
         return;
     }
 
-    frappe.db.get_value("Warehouse", parent, ["lft", "rgt"]).then(r => {
-        let bounds = r.message || {};
-        return frappe.db.get_list("Warehouse", {
-            filters: [["lft", ">", bounds.lft], ["rgt", "<", bounds.rgt]],
-            fields: ["name", "is_group", "lft", "rgt", "parent_warehouse"],
-            order_by: "lft asc",
-            limit: 0
-        });
-    }).then(warehouses => {
+    frappe.xcall("cen_branch_management.api.warehouse_access.get_warehouses_under", { parent: parent }).then(warehouses => {
+        warehouses = warehouses || [];
         if (!warehouses.length) {
             frappe.msgprint(__("There are no warehouses under {0} yet.", [parent]));
             return;
