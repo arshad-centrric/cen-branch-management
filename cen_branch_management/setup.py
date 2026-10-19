@@ -44,7 +44,14 @@ def add_custom_fields():
             {"fieldname": "custom_cen_counter_section", "fieldtype": "Section Break", "hidden": 0, "insert_after": "custom_cen_users_tab"},
             {"fieldname": "custom_cen_total_users_html", "fieldtype": "HTML", "insert_after": "custom_cen_counter_section"},
             {"fieldname": "custom_cen_table_section", "label": "Assigned Users", "fieldtype": "Section Break", "insert_after": "custom_cen_total_users_html"},
-            {"fieldname": "custom_cen_branch_users", "label": "Assigned Branch Users", "fieldtype": "Table", "options": "Branch User", "insert_after": "custom_cen_table_section"}
+            {"fieldname": "custom_cen_branch_users", "label": "Assigned Branch Users", "fieldtype": "Table", "options": "Branch User", "insert_after": "custom_cen_table_section"},
+            # Per-user narrowing of the Warehouse Parent. A user with no rows here gets
+            # every warehouse under the Warehouse Parent. Edited through the
+            # "Warehouses" button on each Assigned Branch Users row.
+            {"fieldname": "custom_cen_warehouse_access_section", "label": "Warehouse Access", "fieldtype": "Section Break", "collapsible": 1, "insert_after": "custom_cen_branch_users"},
+            {"fieldname": "custom_cen_warehouse_access_html", "fieldtype": "HTML", "insert_after": "custom_cen_warehouse_access_section"},
+            {"fieldname": "custom_cen_user_warehouses", "label": "Restricted Warehouses", "fieldtype": "Table", "options": "Branch User Warehouse", "insert_after": "custom_cen_warehouse_access_html",
+             "description": "Users listed here get only these warehouses on this branch. Users not listed get every warehouse under the Warehouse Parent."}
         ],
         "Lead": [
             {"fieldname": "custom_cen_branch", "label": "Branch", "fieldtype": "Link", "options": "Branch", "insert_after": "company", "in_standard_filter": 1}
