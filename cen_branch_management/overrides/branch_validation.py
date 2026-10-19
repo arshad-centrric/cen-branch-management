@@ -1,6 +1,8 @@
 import frappe
 from frappe import _
 
+from cen_branch_management.api.warehouse_access import USER_WAREHOUSES_FIELD, get_warehouse_access_summary
+
 def validate_default_branch(doc, method):
     if not doc.get("custom_cen_default_company"):
         return
@@ -114,3 +116,54 @@ def validate_allowed_item_groups(doc, method=None):
                 title=_("Duplicate Item Group"),
             )
         seen.add(row.item_group)
+
+
+def validate_user_warehouses(doc, method=None):
+    """Branch validate: Restricted Warehouses rows must be warehouses under this
+    branch's Warehouse Parent, for users assigned to the branch. Rows of a user
+    taken off the branch are dropped rather than rejected, so removing someone
+    from Assigned Users is a single step. Also refreshes the Warehouse Access
+    summary on each Assigned Branch Users row."""
+    branch_users = {row.user for row in doc.get("custom_cen_branch_users") or [] if row.user}
+    all_rows = doc.get(USER_WAREHOUSES_FIELD) or []
+    rows = [row for row in all_rows if row.user in branch_users]
+    if len(rows) != len(all_rows):
+        doc.set(USER_WAREHOUSES_FIELD, rows)
+
+    parent = doc.get("custom_cen_warehouse_parent")
+    if rows and not parent:
+        frappe.throw(
+            _("Set a Warehouse Parent on the Details tab before restricting users to particular warehouses."),
+            title=_("Warehouse Parent Required"),
+        )
+
+    parent_bounds = frappe.db.get_value("Warehouse", parent, ["lft", "rgt"], as_dict=True) if parent else None
+    company = doc.get("custom_cen_default_company")
+    seen = set()
+    for row in rows:
+        if (row.user, row.warehouse) in seen:
+            frappe.throw(
+                _("Row #{0}: Warehouse {1} is listed twice for {2} in Restricted Warehouses.").format(
+                    row.idx, frappe.bold(row.warehouse), frappe.bold(row.user)
+                ),
+                title=_("Duplicate Warehouse"),
+            )
+        seen.add((row.user, row.warehouse))
+
+        details = frappe.db.get_value("Warehouse", row.warehouse, ["lft", "rgt", "company"], as_dict=True)
+        if not details or not parent_bounds:
+            # Not a real warehouse: left to the standard link validation.
+            continue
+
+        inside_parent = parent_bounds.lft <= details.lft and details.rgt <= parent_bounds.rgt
+        if not inside_parent or (company and details.company != company):
+            frappe.throw(
+                _("Row #{0}: Warehouse {1} for {2} is not under this branch's Warehouse Parent {3}. Pick one of the branch's own warehouses.").format(
+                    row.idx, frappe.bold(row.warehouse), frappe.bold(row.user), frappe.bold(parent)
+                ),
+                title=_("Invalid Restricted Warehouse"),
+            )
+
+    for row in doc.get("custom_cen_branch_users") or []:
+        if row.user:
+            row.warehouse_access = get_warehouse_access_summary(doc, row.user)

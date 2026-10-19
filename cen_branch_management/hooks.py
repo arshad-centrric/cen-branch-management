@@ -148,6 +148,7 @@ doc_events = {
             "cen_branch_management.overrides.branch_validation.validate_default_branch",
             "cen_branch_management.overrides.branch_validation.validate_default_warehouse_and_cost_center",
             "cen_branch_management.overrides.branch_validation.validate_allowed_item_groups",
+            "cen_branch_management.overrides.branch_validation.validate_user_warehouses",
             "cen_branch_management.overrides.branch_address.validate_branch_address",
         ],
         "on_update": [
