@@ -262,6 +262,49 @@ Object.assign(window.cen_branch_management, {
         return frm._cen_doc_state;
     },
 
+    // Journal Entry: the header Branch is the default for the account lines.
+    // When it changes -- picked by hand or moved by a branch switch -- the lines
+    // that were following it (no branch yet, or the previous header branch)
+    // move with it. A line set to some other branch keeps it.
+    sync_journal_entry_lines: function(frm) {
+        // Clearing the header leaves the lines as they are, still following the
+        // last branch, so picking a new one afterwards moves them as well.
+        let header = frm.doc.custom_cen_branch || null;
+        if (!header || frm.doc.docstatus !== 0) return;
+
+        let state = cen_branch_management.get_doc_state(frm);
+        let previous = state.lines_branch;
+        state.lines_branch = header;
+
+        (frm.doc.accounts || []).forEach(row => {
+            if (row.branch && row.branch !== previous) return;
+            if (row.branch !== header) {
+                frappe.model.set_value(row.doctype, row.name, "branch", header);
+            }
+        });
+    },
+
+    // Remembers which branch this entry's lines follow, before any change event.
+    init_journal_entry_lines: function(frm) {
+        let state = cen_branch_management.get_doc_state(frm);
+        if (!("lines_branch" in state)) {
+            state.lines_branch = frm.doc.custom_cen_branch || null;
+        }
+    },
+
+    // A new account line starts on the header Branch. ERPNext copies the first
+    // line's dimensions onto every new line, in a handler that runs after ours,
+    // so this waits for it to finish and then puts the header branch back.
+    fill_journal_entry_line: function(frm, cdt, cdn) {
+        frappe.after_ajax(() => setTimeout(() => {
+            let row = locals[cdt] && locals[cdt][cdn];
+            let header = frm.doc.custom_cen_branch;
+            if (row && header && frm.doc.docstatus === 0 && row.branch !== header) {
+                frappe.model.set_value(cdt, cdn, "branch", header);
+            }
+        }, 0));
+    },
+
     // Change handler for a document's own branch field. Decides whether the doc
     // now carries a deliberate branch of its own (see resolve_scope_for_form).
     //
@@ -688,6 +731,27 @@ cen_branch_management.get_form_doctypes().forEach(doctype => {
         };
 
         frappe.views.ListView.prototype._cen_patched = true;
+    }
+});
+
+// Journal Entry: keep the account lines on the header Branch (see
+// sync_journal_entry_lines). Registered on top of the shared handlers above,
+// which still decide the header's own value and query.
+frappe.ui.form.on("Journal Entry", {
+    onload: function(frm) {
+        cen_branch_management.init_journal_entry_lines(frm);
+    },
+    refresh: function(frm) {
+        cen_branch_management.init_journal_entry_lines(frm);
+    },
+    custom_cen_branch: function(frm) {
+        cen_branch_management.sync_journal_entry_lines(frm);
+    }
+});
+
+frappe.ui.form.on("Journal Entry Account", {
+    accounts_add: function(frm, cdt, cdn) {
+        cen_branch_management.fill_journal_entry_line(frm, cdt, cdn);
     }
 });
 

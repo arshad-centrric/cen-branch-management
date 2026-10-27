@@ -164,6 +164,9 @@ doc_events = {
     "Address": {
         "validate": "cen_branch_management.overrides.branch_address.validate_address_branch"
     },
+    "Journal Entry": {
+        "validate": "cen_branch_management.overrides.journal_entry_branch.sync_journal_entry_branch"
+    },
     "User": {
         "validate": "cen_branch_management.overrides.user_default_branch.validate_user_default_branch",
         "on_update": "cen_branch_management.api.permissions.sync_permissions_on_user_update"
