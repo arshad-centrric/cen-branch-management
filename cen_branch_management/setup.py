@@ -62,13 +62,23 @@ def add_custom_fields():
         "Quotation": [
             {"fieldname": "custom_cen_branch", "label": "Branch", "fieldtype": "Link", "options": "Branch", "insert_after": "company", "in_standard_filter": 1}
         ],
-        # The branch of the entry as a whole. The ledger still takes each account
+        # The branch of the document as a whole. The ledger still takes each
         # line's own Branch (the accounting dimension); this is the default those
-        # lines start from and follow (see overrides/journal_entry_branch.py and
-        # branch_filters.js), and what the list is filtered on.
+        # lines start from and follow (see overrides/header_branch.py and
+        # branch_filters.js). Journal Entry's list is filtered on it.
         "Journal Entry": [
             {"fieldname": "custom_cen_branch", "label": "Branch", "fieldtype": "Link", "options": "Branch", "insert_after": "company", "in_standard_filter": 1,
              "description": "Default branch for the account lines. A line can still be set to another branch."}
+        ],
+        "Material Request": [
+            {"fieldname": "custom_cen_branch", "label": "Branch", "fieldtype": "Link", "options": "Branch", "insert_after": "company", "in_standard_filter": 1,
+             "description": "Default branch for the item lines. A line can still be set to another branch."}
+        ],
+        # Stock Entry already has ERPNext's header Branch (the accounting
+        # dimension, down in Accounting Dimensions); it is kept equal to this one.
+        "Stock Entry": [
+            {"fieldname": "custom_cen_branch", "label": "Branch", "fieldtype": "Link", "options": "Branch", "insert_after": "company", "in_standard_filter": 1,
+             "description": "Default branch for the item lines. A line can still be set to another branch."}
         ],
         # Not named custom_cen_branch like the transaction fields: the switcher keeps
         # the active branch as a user default under that key, and Frappe fills any

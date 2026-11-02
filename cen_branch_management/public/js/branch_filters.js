@@ -262,21 +262,47 @@ Object.assign(window.cen_branch_management, {
         return frm._cen_doc_state;
     },
 
-    // Journal Entry: the header Branch is the default for the account lines.
-    // When it changes -- picked by hand or moved by a branch switch -- the lines
-    // that were following it (no branch yet, or the previous header branch)
-    // move with it. A line set to some other branch keeps it.
-    sync_journal_entry_lines: function(frm) {
+    // Documents with a header Branch (custom_cen_branch) added by this app,
+    // whose lines carry the Branch accounting dimension: doctype -> lines
+    // table. Keep in step with LINE_TABLES in overrides/header_branch.py.
+    line_branch_tables: {
+        "Journal Entry": "accounts",
+        "Material Request": "items",
+        "Stock Entry": "items"
+    },
+
+    // Where a form's lines take their Branch from: the header field and the
+    // lines table, or null when its lines have no Branch. Besides the documents
+    // above, this covers the transactions whose header Branch is ERPNext's own
+    // accounting dimension (Sales Invoice, Purchase Order, ...).
+    get_line_branch_setup: function(frm) {
+        let header_field = frm.fields_dict.custom_cen_branch ? "custom_cen_branch" : (frm.fields_dict.branch ? "branch" : null);
+        let table = cen_branch_management.line_branch_tables[frm.doctype] || "items";
+        let table_df = frm.fields_dict[table] && frm.fields_dict[table].df;
+
+        if (!header_field || !table_df || table_df.fieldtype !== "Table" || !frappe.meta.has_field(table_df.options, "branch")) {
+            return null;
+        }
+        return { header_field: header_field, table: table };
+    },
+
+    // The header Branch is the default for the lines. When it changes -- picked
+    // by hand or moved by a branch switch -- the lines that were following it
+    // (no branch yet, or the previous header branch) move with it. A line set
+    // to some other branch keeps it.
+    sync_line_branches: function(frm) {
+        let setup = cen_branch_management.get_line_branch_setup(frm);
+
         // Clearing the header leaves the lines as they are, still following the
         // last branch, so picking a new one afterwards moves them as well.
-        let header = frm.doc.custom_cen_branch || null;
+        let header = setup && frm.doc[setup.header_field];
         if (!header || frm.doc.docstatus !== 0) return;
 
         let state = cen_branch_management.get_doc_state(frm);
         let previous = state.lines_branch;
         state.lines_branch = header;
 
-        (frm.doc.accounts || []).forEach(row => {
+        (frm.doc[setup.table] || []).forEach(row => {
             if (row.branch && row.branch !== previous) return;
             if (row.branch !== header) {
                 frappe.model.set_value(row.doctype, row.name, "branch", header);
@@ -284,18 +310,19 @@ Object.assign(window.cen_branch_management, {
         });
     },
 
-    // Remembers which branch this entry's lines follow, before any change event.
-    init_journal_entry_lines: function(frm) {
+    // Remembers which branch this document's lines follow, before any change event.
+    init_line_branches: function(frm) {
+        let setup = cen_branch_management.get_line_branch_setup(frm);
         let state = cen_branch_management.get_doc_state(frm);
-        if (!("lines_branch" in state)) {
-            state.lines_branch = frm.doc.custom_cen_branch || null;
+        if (setup && !("lines_branch" in state)) {
+            state.lines_branch = frm.doc[setup.header_field] || null;
         }
     },
 
-    // A new account line starts on the header Branch. ERPNext copies the first
-    // line's dimensions onto every new line, in a handler that runs after ours,
-    // so this waits for it to finish and then puts the header branch back.
-    fill_journal_entry_line: function(frm, cdt, cdn) {
+    // A new line starts on the header Branch. ERPNext copies the first line's
+    // dimensions onto new lines in some forms (Journal Entry), in a handler
+    // that runs after ours, so this waits for it and then puts the header back.
+    fill_line_branch: function(frm, cdt, cdn) {
         frappe.after_ajax(() => setTimeout(() => {
             let row = locals[cdt] && locals[cdt][cdn];
             let header = frm.doc.custom_cen_branch;
@@ -303,6 +330,111 @@ Object.assign(window.cen_branch_management, {
                 frappe.model.set_value(cdt, cdn, "branch", header);
             }
         }, 0));
+    },
+
+    // Line cost centers that are on the branch's default cost center move to the
+    // new branch's default when the branch changes. A line on any other cost
+    // center keeps it (one from another company is handled by the company fix).
+    follow_line_cost_centers: function(frm, scope) {
+        let next = scope && scope.cen_branch_default_cost_center;
+        if (!next || frm.doc.docstatus !== 0) return;
+
+        let state = cen_branch_management.get_doc_state(frm);
+        let previous = state.lines_cost_center;
+        state.lines_cost_center = next;
+        if (!previous || previous === next) return;
+
+        let table = cen_branch_management.line_branch_tables[frm.doctype] || "items";
+        (frm.doc[table] || []).forEach(row => {
+            if (row.cost_center === previous) {
+                frappe.model.set_value(row.doctype, row.name, "cost_center", next);
+            }
+        });
+    },
+
+    // After the company changes on a draft (a branch switch on a new document,
+    // or picked by hand), accounts, cost centers and tax templates already
+    // filled in for the old company stay, though the fields are now filtered
+    // by the new one. This asks the server which of them belong to another
+    // company and what ERPNext would fill in instead, and applies that.
+    //
+    // It waits until ERPNext's own company handlers have run (they reset some
+    // of these fields too, e.g. Stock Entry line cost centers), so the result
+    // is not overwritten by them.
+    schedule_company_fix: function(frm) {
+        clearTimeout(frm._cen_company_fix_timer);
+        frm._cen_company_fix_timer = setTimeout(() => {
+            frappe.after_ajax(() => cen_branch_management.fix_company_fields(frm));
+        }, 400);
+    },
+
+    COMPANY_LINK_DOCTYPES: [
+        "Account",
+        "Cost Center",
+        "Sales Taxes and Charges Template",
+        "Purchase Taxes and Charges Template"
+    ],
+
+    // fieldname -> value, for the filled company-bound link fields of a doc or row.
+    get_company_links: function(doc) {
+        let out = {};
+        frappe.meta.get_docfields(doc.doctype).forEach(df => {
+            if (df.fieldtype === "Link" && cen_branch_management.COMPANY_LINK_DOCTYPES.includes(df.options) && doc[df.fieldname]) {
+                out[df.fieldname] = doc[df.fieldname];
+            }
+        });
+        return out;
+    },
+
+    fix_company_fields: function(frm) {
+        if (frm.doc.docstatus !== 0 || !frm.doc.company) return;
+
+        let values = { header: cen_branch_management.get_company_links(frm.doc), rows: [] };
+        frm.meta.fields.filter(df => df.fieldtype === "Table").forEach(df => {
+            (frm.doc[df.fieldname] || []).forEach(row => {
+                let links = cen_branch_management.get_company_links(row);
+                if (Object.keys(links).length) {
+                    values.rows.push({ name: row.name, doctype: row.doctype, parentfield: df.fieldname, item_code: row.item_code || null, values: links });
+                }
+            });
+        });
+        if (!Object.keys(values.header).length && !values.rows.length) return;
+
+        let company = frm.doc.company;
+        let docname = frm.docname;
+        let row_doctypes = {};
+        values.rows.forEach(row => { row_doctypes[row.name] = row.doctype; });
+        frappe.call({
+            method: "cen_branch_management.api.company_fields.get_company_corrections",
+            args: {
+                doctype: frm.doctype,
+                company: company,
+                values: values,
+                branch: frm.doc.custom_cen_branch || frm.doc.branch || null
+            }
+        }).then(r => {
+            let fix = r && r.message;
+            // Moved on to another document, or the company changed again meanwhile.
+            if (!fix || frm.docname !== docname || frm.doc.company !== company) return;
+
+            (fix.clear_tables || []).forEach(fieldname => frm.clear_table(fieldname));
+            if (fix.clear_tables && fix.clear_tables.length) {
+                fix.clear_tables.forEach(fieldname => frm.refresh_field(fieldname));
+                frm.trigger("calculate_taxes_and_totals");
+            }
+
+            Object.keys(fix.header || {}).forEach(fieldname => frm.set_value(fieldname, fix.header[fieldname] || null));
+
+            Object.keys(fix.rows || {}).forEach(row_name => {
+                let row_doctype = row_doctypes[row_name];
+                if (!row_doctype || !(locals[row_doctype] || {})[row_name]) return;
+
+                let changes = fix.rows[row_name];
+                Object.keys(changes).forEach(fieldname => {
+                    frappe.model.set_value(row_doctype, row_name, fieldname, changes[fieldname] || null);
+                });
+            });
+        });
     },
 
     // Change handler for a document's own branch field. Decides whether the doc
@@ -340,6 +472,7 @@ Object.assign(window.cen_branch_management, {
             cen_branch_management.get_doc_state(frm).scope = scope;
             cen_branch_management.apply_sandbox_queries(frm, scope);
             cen_branch_management.apply_branch_defaults(frm, scope);
+            cen_branch_management.follow_line_cost_centers(frm, scope);
             cen_branch_management.apply_branch_address_queries(frm);
         });
     },
@@ -677,6 +810,7 @@ cen_branch_management.get_form_doctypes().forEach(doctype => {
         },
         company: function(frm) {
             cen_branch_management.apply_branch_scoping(frm);
+            cen_branch_management.schedule_company_fix(frm);
         },
         supplier: function(frm) {
             cen_branch_management.apply_branch_scoping(frm);
@@ -734,25 +868,39 @@ cen_branch_management.get_form_doctypes().forEach(doctype => {
     }
 });
 
-// Journal Entry: keep the account lines on the header Branch (see
-// sync_journal_entry_lines). Registered on top of the shared handlers above,
-// which still decide the header's own value and query.
-frappe.ui.form.on("Journal Entry", {
-    onload: function(frm) {
-        cen_branch_management.init_journal_entry_lines(frm);
-    },
-    refresh: function(frm) {
-        cen_branch_management.init_journal_entry_lines(frm);
-    },
-    custom_cen_branch: function(frm) {
-        cen_branch_management.sync_journal_entry_lines(frm);
-    }
+// Keep the lines on the header Branch (see sync_line_branches). Registered on
+// top of the shared handlers above, which still decide the header's own value
+// and query.
+cen_branch_management.get_form_doctypes().forEach(doctype => {
+    frappe.ui.form.on(doctype, {
+        onload: function(frm) {
+            cen_branch_management.init_line_branches(frm);
+        },
+        refresh: function(frm) {
+            cen_branch_management.init_line_branches(frm);
+        },
+        branch: function(frm) {
+            cen_branch_management.sync_line_branches(frm);
+        },
+        custom_cen_branch: function(frm) {
+            cen_branch_management.sync_line_branches(frm);
+        }
+    });
 });
 
-frappe.ui.form.on("Journal Entry Account", {
-    accounts_add: function(frm, cdt, cdn) {
-        cen_branch_management.fill_journal_entry_line(frm, cdt, cdn);
-    }
+// New lines start on the header Branch in the documents with our own header
+// Branch. (In the transactions ERPNext copies the first line's Branch, which
+// already follows the header.)
+[
+    ["Journal Entry Account", "accounts_add"],
+    ["Material Request Item", "items_add"],
+    ["Stock Entry Detail", "items_add"]
+].forEach(([child_doctype, add_event]) => {
+    frappe.ui.form.on(child_doctype, {
+        [add_event]: function(frm, cdt, cdn) {
+            cen_branch_management.fill_line_branch(frm, cdt, cdn);
+        }
+    });
 });
 
 // Child Table Item Interception (Warehouse Override)

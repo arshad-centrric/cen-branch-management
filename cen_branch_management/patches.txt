@@ -9,3 +9,4 @@ cen_branch_management.patches.v0_0_3.add_branch_address
 cen_branch_management.patches.v0_0_4.add_user_default_branch
 cen_branch_management.patches.v0_0_5.add_branch_user_warehouses
 cen_branch_management.patches.v0_0_6.add_journal_entry_branch
+cen_branch_management.patches.v0_0_7.add_stock_document_branch

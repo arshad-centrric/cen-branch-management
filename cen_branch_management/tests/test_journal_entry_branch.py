@@ -2,7 +2,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import today
 
-from cen_branch_management.overrides.journal_entry_branch import backfill_journal_entry_branch
+from cen_branch_management.overrides.header_branch import backfill_header_branch
 from cen_branch_management.tests import utils
 
 HEADER = "custom_cen_branch"
@@ -81,7 +81,7 @@ class TestJournalEntryBranch(IntegrationTestCase):
         for doc in (single, mixed, partial):
             frappe.db.set_value("Journal Entry", doc.name, HEADER, None, update_modified=False)
 
-        backfill_journal_entry_branch()
+        backfill_header_branch("Journal Entry")
 
         header_of = lambda doc: frappe.db.get_value("Journal Entry", doc.name, HEADER)
         self.assertEqual(header_of(single), self.kochi)

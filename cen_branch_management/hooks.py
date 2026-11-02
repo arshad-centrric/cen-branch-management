@@ -165,7 +165,13 @@ doc_events = {
         "validate": "cen_branch_management.overrides.branch_address.validate_address_branch"
     },
     "Journal Entry": {
-        "validate": "cen_branch_management.overrides.journal_entry_branch.sync_journal_entry_branch"
+        "validate": "cen_branch_management.overrides.header_branch.sync_header_branch"
+    },
+    "Material Request": {
+        "validate": "cen_branch_management.overrides.header_branch.sync_header_branch"
+    },
+    "Stock Entry": {
+        "validate": "cen_branch_management.overrides.header_branch.sync_header_branch"
     },
     "User": {
         "validate": "cen_branch_management.overrides.user_default_branch.validate_user_default_branch",
