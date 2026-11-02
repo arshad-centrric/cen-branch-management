@@ -19,24 +19,30 @@ def add_custom_fields():
     if frappe.db.exists("Custom Field", "User Permission-custom_cen_source_branch"):
         frappe.delete_doc("Custom Field", "User Permission-custom_cen_source_branch", force=True)
 
+    # Branch fields that point at warehouses, cost centers, addresses, price
+    # lists and item groups carry ignore_user_permissions (here and in the child
+    # doctypes): they describe the branch, and Frappe would otherwise hide the
+    # Branch itself from a member whose own permissions don't cover one of them
+    # -- e.g. a user narrowed to some of the branch's warehouses loses sight of
+    # a branch whose Warehouse Parent they are not given.
     custom_fields = {
         "Branch": [
             {"fieldname": "custom_cen_default_company", "label": "Company", "fieldtype": "Link", "options": "Company", "insert_after": "branch"},
             {"fieldname": "custom_cen_warehouse_section", "label": "Warehouse", "fieldtype": "Section Break", "insert_after": "custom_cen_default_company"},
-            {"fieldname": "custom_cen_warehouse_parent", "label": "Warehouse Parent", "fieldtype": "Link", "options": "Warehouse", "insert_after": "custom_cen_warehouse_section"},
+            {"fieldname": "custom_cen_warehouse_parent", "label": "Warehouse Parent", "fieldtype": "Link", "options": "Warehouse", "ignore_user_permissions": 1, "insert_after": "custom_cen_warehouse_section"},
             {"fieldname": "custom_cen_warehouse_col", "fieldtype": "Column Break", "insert_after": "custom_cen_warehouse_parent"},
-            {"fieldname": "custom_cen_default_warehouse", "label": "Default Warehouse", "fieldtype": "Link", "options": "Warehouse", "insert_after": "custom_cen_warehouse_col"},
+            {"fieldname": "custom_cen_default_warehouse", "label": "Default Warehouse", "fieldtype": "Link", "options": "Warehouse", "ignore_user_permissions": 1, "insert_after": "custom_cen_warehouse_col"},
             {"fieldname": "custom_cen_cost_center_section", "label": "Cost Center", "fieldtype": "Section Break", "insert_after": "custom_cen_default_warehouse"},
-            {"fieldname": "custom_cen_cost_center_parent", "label": "Cost Center Parent", "fieldtype": "Link", "options": "Cost Center", "insert_after": "custom_cen_cost_center_section"},
+            {"fieldname": "custom_cen_cost_center_parent", "label": "Cost Center Parent", "fieldtype": "Link", "options": "Cost Center", "ignore_user_permissions": 1, "insert_after": "custom_cen_cost_center_section"},
             {"fieldname": "custom_cen_cost_center_col", "fieldtype": "Column Break", "insert_after": "custom_cen_cost_center_parent"},
-            {"fieldname": "custom_cen_default_cost_center", "label": "Default Cost Center", "fieldtype": "Link", "options": "Cost Center", "insert_after": "custom_cen_cost_center_col"},
+            {"fieldname": "custom_cen_default_cost_center", "label": "Default Cost Center", "fieldtype": "Link", "options": "Cost Center", "ignore_user_permissions": 1, "insert_after": "custom_cen_cost_center_col"},
             {"fieldname": "custom_cen_address_section", "label": "Address", "fieldtype": "Section Break", "insert_after": "custom_cen_default_cost_center"},
-            {"fieldname": "custom_cen_branch_address", "label": "Branch Address", "fieldtype": "Link", "options": "Address", "insert_after": "custom_cen_address_section"},
+            {"fieldname": "custom_cen_branch_address", "label": "Branch Address", "fieldtype": "Link", "options": "Address", "ignore_user_permissions": 1, "insert_after": "custom_cen_address_section"},
             {"fieldname": "custom_cen_pricing_section", "label": "Configuration", "fieldtype": "Tab Break", "insert_after": "custom_cen_branch_address"},
-            {"fieldname": "custom_cen_default_selling_price_list", "label": "Default Selling Price List", "fieldtype": "Link", "options": "Price List", "insert_after": "custom_cen_pricing_section"},
+            {"fieldname": "custom_cen_default_selling_price_list", "label": "Default Selling Price List", "fieldtype": "Link", "options": "Price List", "ignore_user_permissions": 1, "insert_after": "custom_cen_pricing_section"},
             {"fieldname": "custom_cen_allowed_selling_price_lists", "label": "Allowed Selling Price Lists", "fieldtype": "Table", "options": "Branch Allowed Selling Price List", "insert_after": "custom_cen_default_selling_price_list"},
             {"fieldname": "custom_cen_pricing_col", "fieldtype": "Column Break", "insert_after": "custom_cen_allowed_selling_price_lists"},
-            {"fieldname": "custom_cen_default_buying_price_list", "label": "Default Buying Price List", "fieldtype": "Link", "options": "Price List", "insert_after": "custom_cen_pricing_col"},
+            {"fieldname": "custom_cen_default_buying_price_list", "label": "Default Buying Price List", "fieldtype": "Link", "options": "Price List", "ignore_user_permissions": 1, "insert_after": "custom_cen_pricing_col"},
             {"fieldname": "custom_cen_allowed_buying_price_lists", "label": "Allowed Buying Price Lists", "fieldtype": "Table", "options": "Branch Allowed Buying Price List", "insert_after": "custom_cen_default_buying_price_list"},
             {"fieldname": "custom_cen_item_groups_section", "label": "Allowed Item Groups", "fieldtype": "Section Break", "insert_after": "custom_cen_allowed_buying_price_lists"},
             {"fieldname": "custom_cen_allowed_item_groups", "label": "Allowed Item Groups", "fieldtype": "Table", "options": "Branch Item Group", "insert_after": "custom_cen_item_groups_section"},

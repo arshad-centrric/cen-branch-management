@@ -16,19 +16,13 @@ Object.assign(window.cen_branch_management, {
         "Delivery Note",
         "Purchase Receipt",
         "Journal Entry",
-        "Payment Entry"
-    ],
-
-    // Stock doctypes whose forms get the same scoping and branch defaults, but
-    // whose list views are left alone (they were never branch-filtered, and
-    // doing so would hide existing entries that carry no branch).
-    form_only_doctypes: [
+        "Payment Entry",
         "Stock Entry",
         "Material Request"
     ],
 
     get_form_doctypes: function() {
-        return cen_branch_management.branch_doctypes.concat(cen_branch_management.form_only_doctypes);
+        return cen_branch_management.branch_doctypes;
     },
 
     // Header fields that take the branch's default warehouse. A function is
