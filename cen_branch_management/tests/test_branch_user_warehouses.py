@@ -180,6 +180,14 @@ class TestBranchUserWarehouses(IntegrationTestCase):
         self.assertEqual(scope["cen_branch_default_warehouse"], sorted([self.b, self.d])[0])
         self.assertEqual(frappe.defaults.get_user_default("cen_branch_default_warehouse", user), scope["cen_branch_default_warehouse"])
 
+    def test_restricted_user_can_still_see_the_branch(self):
+        # Neither the Warehouse Parent, the Default Warehouse nor another user's
+        # restricted warehouse is among this user's warehouses.
+        user, other = utils.make_user(), utils.make_user()
+        branch = self.make_branch([user, other], restrictions=[(user, self.b), (other, self.d)])
+
+        self.assertTrue(frappe.permissions.has_user_permission(frappe.get_doc("Branch", branch.name), user))
+
     def test_restricted_user_keeps_the_branch_default_when_allowed(self):
         user = utils.make_user()
         branch = self.make_branch([user], restrictions=[(user, self.a), (user, self.b)])

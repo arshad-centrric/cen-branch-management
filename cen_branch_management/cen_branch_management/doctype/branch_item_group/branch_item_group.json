@@ -13,6 +13,7 @@
   {
    "fieldname": "item_group",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "in_list_view": 1,
    "label": "Item Group",
    "options": "Item Group",
@@ -23,7 +24,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-10-06 10:00:00.000000",
+ "modified": "2026-11-02 16:06:29.482734",
  "modified_by": "Administrator",
  "module": "Cen Branch Management",
  "name": "Branch Item Group",
